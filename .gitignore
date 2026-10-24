@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# vietiniai duomenys ir nustatymai – ne kodas
+data/
+*.db
+*.db-journal
+vmgt_config.json
+debug.log

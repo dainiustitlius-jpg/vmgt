@@ -1,0 +1,7 @@
+projektas;projekto_pavadinimas;mazgas;mazgo_pavadinimas;seka;centras;operacija;detale;kiekis;norma_min;brezinys;revizija
+P-24150;Kėlimo platforma KP-2 (PAVYZDYS);100;Platformos rėmas;10;LAZ-01;Lakštų detalių pjovimas;KP2-101;1;40;KP2-100;A
+P-24150;Kėlimo platforma KP-2 (PAVYZDYS);100;Platformos rėmas;20;LNK-01;Lenkimas;KP2-101;1;35;KP2-100;A
+P-24150;Kėlimo platforma KP-2 (PAVYZDYS);100;Platformos rėmas;30;SV-01;Rėmo suvirinimas;;1;180;KP2-100;A
+P-24150;Kėlimo platforma KP-2 (PAVYZDYS);100;Platformos rėmas;40;DAZ-01;Dažymas RAL 7016;;1;60;KP2-100;A
+P-24150;Kėlimo platforma KP-2 (PAVYZDYS);200;Hidraulikos blokas;10;MECH-01;Korpuso frezavimas;KP2-201;2;45;KP2-200;B
+P-24150;Kėlimo platforma KP-2 (PAVYZDYS);200;Hidraulikos blokas;20;SUR-01;Bloko surinkimas;;2;90;KP2-200;B

@@ -1,6 +1,11 @@
 # VMGT — konteksto santrauka
 
 Vienetinės metalo gamybos projektų stebėsenos ir shop floor web sistema.
+Gaminiai projektuojami SolidWorks (PDM), technologai paruošia failus mašinoms
+(Lantek – lazeris), gamyba: pjovimas → lenkimas → suvirinimas → dažymas →
+surinkimas → programavimas (PLC, robotai) → testavimas. ERP – MS Dynamics 365
+F&O. Dauguma darbo centrų rankiniai, staklės integruotis negalės.
+
 Architektūros juodraštis: https://claude.ai/artifact/9EELgdH4xQFqTFnbJmm8nt
 
 ## Darbo taisyklės
@@ -12,4 +17,93 @@ Architektūros juodraštis: https://claude.ai/artifact/9EELgdH4xQFqTFnbJmm8nt
 - Commit / push – tik vartotojui paprašius.
 - Gamybos serverių ir vartotojo duomenų nekeisti; slaptažodžių nerodyti.
 - Neaiškų UX prašymą pirma patikslinti (2–3 variantai), ne spėti.
-- Testai gyvena saugykloje (`tests/`), ne laikiname aplanke.
+- Testai gyvena saugykloje (`tests/`), ne laikiname aplanke:
+  `python -m pytest`.
+
+## Paleidimas
+
+`python -m vmgt` (portas 8080). Nustatymai – `vmgt_config.json` darbo
+kataloge (`host`, `port`, `data_dir`, `seed_sample`, `session_hours`); failo
+nėra – numatytosios. Duomenys – `data/` (`vmgt.db`, įkelti brėžiniai
+`data/files/`), į git neįtraukiami.
+
+**Testinė aplinka (nuo 2026-10-24) – be integracijų.** Tuščia bazė užpildoma
+pavyzdžiais (`services/seed.py`): 3 projektai su žyme PAVYZDYS, 10 darbo
+centrų, dalis darbų „atlikta“ praeityje, kad cechas ir analitika turėtų ką
+rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
+`admin`, `vadovas`, `planuotojas`, `technologas`, `meistras` (PIN 9999),
+`kokybe`, `op1` (PIN 1111), `op2` (2222), `op3` (3333, tik SV-01 / SV-02).
+
+## Struktūra
+
+| Kur | Kas |
+|---|---|
+| `vmgt/db.py` | SQLite jungtis, schema (`MIGRATIONS`, `PRAGMA user_version`), laikrodis `now()` / `set_clock` testams, įvykių žurnalas `log_event` |
+| `vmgt/services/` | **Gamybos taisyklės be web** – jokio FastAPI. `RuleError` → 409, `NotFound` → 404 |
+| `services/auth.py` | Vartotojai, rolės (`ROLES`), teisės (`PERMS`), PBKDF2, sesijos (bazėje – žetono SHA-256), PIN terminalui, centrų apribojimas `can_centre` |
+| `services/projects.py` | Krepšelis, mazgai (`requires` – nuo kurių mazgų priklauso), etapai (`PHASE_KINDS`), darbo centrai |
+| `services/tasks.py` | Užduotys, eilės, terminalo veiksmai, **visos pradėjimo taisyklės – `block_reason`** |
+| `services/ncr.py` | Neatitiktys: atvira → priskirta → uzdaryta |
+| `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
+| `services/importer.py` | Maršrutų CSV importas (vėliau – D365 / PDM) |
+| `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
+| `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
+| `vmgt/web/static/` | `index.html`, `app.js` (hash maršrutai), `app.css` – be surinkimo įrankio |
+| `pavyzdziai/marsrutai.csv` | Importo pavyzdys |
+
+## Duomenų modelis
+
+Projektas → mazgai → (etapai mazgui arba visam projektui) → užduotys.
+Užduotis = viena mazgo maršruto operacija viename darbo centre (`seq` – vieta
+maršrute, `queue_pos` – vieta centro eilėje, `approved` – matoma terminale).
+Vykdymas: `intervals` (darbas) ir `pauses` (su priežastimi); kiekiai –
+`qty_good` / `qty_scrap` ant užduoties. `events` – visų pakeitimų žurnalas.
+
+## Terminalo taisyklės (`tasks.block_reason`)
+
+Pradėti galima, jei:
+1. užduotis patvirtinta planuotojo (`approved`);
+2. centre niekas nevyksta ir nėra pristabdytos užduoties;
+3. griežtos eilės centre (`strict_order`, numatyta) – tai pirma patvirtinta;
+4. ankstesnė maršruto operacija baigta arba perdavė bent dalį (`qty_good > 0`)
+   – dalinis perdavimas vienetinėje gamyboje kasdienis;
+5. pirmoji mazgo operacija – visi `requires` mazgai baigti;
+6. brėžinio revizija nepasikeitė; pasikeitus – meistras patvirtina
+   (`ack_revision`, teisė `ack_rev`).
+
+Pauzė – tik su priežastimi (`PAUSE_REASONS`), „Kita“ – su pastaba. Stop
+įrašo kiekį: gera + brokas ≥ planas → baigta, kitaip lieka eilėje savo
+vietoje (dalinis). Brokas > 0 – terminalas siūlo neatitikties įrašą.
+Pirmas pradėtas darbas pažymi atitinkamą projekto etapą „vykdoma“
+(`CENTRE_PHASE`: surinkimas / elektra → surinkimas, testavimas → testavimas,
+kiti → gamyba) ir projektą perkelia iš krepšelio į vykdomus.
+
+**Laikmatis.** Terminalas ir cechas gauna `work_s` – tik UŽDARYTŲ intervalų
+sumą, o atvirą naršyklė prideda pati kas sekundę. Iki 2026-10-24 terminalas
+gaudavo sumą su atviru intervalu ir jį pridėdavo dar kartą (8:02 vietoj
+6:00). `test_terminalo_laikas_be_atviro_intervalo`.
+
+## Analitika
+
+Darbo laikas, prastovos (planuotos pauzės `pertrauka`, `pamaina` rodomos,
+bet į prastovą neįeina – kitaip naktis užgožtų tikras priežastis), faktas /
+norma, brokas, laukimas prieš operaciją (nuo ankstesnės maršruto operacijos
+pabaigos iki šios pradžios), etapų planas prieš faktą, neatitiktys pagal
+kategoriją.
+
+## Ko dar nėra (sąmoningai)
+
+- Integracijų (D365, PDM, Lantek) – testinė versija be jų.
+- Lantek lakšto kaip atskiros užduoties su detalėmis iš kelių projektų.
+- Etapų priklausomybių (pabaiga → pradžia, poslinkis) – kol kas tik mazgų
+  `requires` ir maršruto eilė.
+- Kokybės patikrų šablonų ir protokolų, nuotraukų prie neatitikčių.
+- Patvirtintos eilės kopijos: planuotojo perrikiavimas matomas terminale iš
+  karto (PrefabFlow laikė patvirtintą tvarką atskirai).
+- MS SQL – schema paprasta, kad perkelti būtų nesunku.
+
+## UI pastaba
+
+`[hidden] { display: none !important; }` būtina: be jos `#modal`
+`display: grid` nugalėdavo `hidden` atributą, ir paslėptas langas dengė visus
+mygtukus (rasta Playwright patikra 2026-10-24).

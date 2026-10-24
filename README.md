@@ -19,7 +19,14 @@ python -m vmgt
 ```
 
 Naršyklėje: <http://localhost:8080>. Pirmą kartą bazė sukuriama
-`data/vmgt.db` ir užpildoma pavyzdiniais duomenimis (žr. `CLAUDE.md`).
+`data/vmgt.db` ir užpildoma pavyzdiniais duomenimis.
+
+Testiniai vartotojai (slaptažodis visiems `vmgt2026`, tik testinei aplinkai):
+`admin`, `vadovas`, `planuotojas`, `technologas`, `meistras`, `kokybe`.
+Operatoriai jungiasi PIN kodu terminale: `1111`, `2222`, `3333`.
+
+Terminalą planšetėje atidarykite adresu `http://<kompiuterio-IP>:8080`
+tame pačiame tinkle. Iš naujo pradėti su pavyzdžiais – ištrinkite `data/`.
 
 ## Testai
 

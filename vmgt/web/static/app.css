@@ -1,12 +1,17 @@
-/* VMGT: plieno pilki neutralūs tonai, gilios mėlynos akcentas.
-   Būsenų spalvos – tik duomenims: dirba žalia, pristabdyta gintaro,
-   laukia pilka, užrakinta / neatitiktis raudona. */
+/* VMGT: šviesus inžinerinis stilius – kaip CAD brėžinys ir technologinė
+   dokumentacija. Plieno pilki neutralūs, brėžinio mėlyna – veiksmams ir
+   nuorodoms, signalinė oranžinė – tik ženklui ir žymekliams (logotipas,
+   aktyvus meniu, antraščių žymė, fokusas). Oranžinė NEnaudojama būsenoms:
+   pristabdyta – ochra, kad nesimaišytų su ženklo spalva. Būsenų spalvos –
+   tik duomenims: dirba žalia, pristabdyta ochra, laukia pilka, užrakinta /
+   neatitiktis raudona. */
 :root {
-  --bg: #eef1f4; --paper: #fff; --line: #d3d9e0; --line-soft: #e6eaee;
-  --fg: #1b232c; --muted: #5d6874;
-  --accent: #1f4e79; --accent-fg: #fff;
-  --ok: #2a8a4a; --pause: #c27a0e; --wait: #7b8794; --bad: #c23a2b; --ready: #2f7d8c;
-  --head: #1b2633; --head-fg: #e9eef3;
+  --bg: #eef1f4; --paper: #fff; --line: #cfd6de; --line-soft: #e5e9ee; --thead: #e9eef4;
+  --fg: #18202a; --muted: #5a6573;
+  --accent: #1d5fa8; --accent-hover: #164b86; --accent-fg: #fff;
+  --signal: #f26a1b; --grid: rgba(29, 95, 168, .055); --tick: rgba(29, 95, 168, .45);
+  --ok: #23854a; --pause: #a87800; --wait: #7b8794; --bad: #c9372c; --ready: #1b8a9a;
+  --head: #1a2028; --head-fg: #e8edf2;
   --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --f-mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
   --p-projektavimas: #3b6fb6; --p-technologija: #2f8f9d; --p-komponentai: #8a6bbf; --p-gamyba: #c0762a;
@@ -14,62 +19,84 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12171d; --paper: #1a2129; --line: #323d49; --line-soft: #252e38;
-    --fg: #e6ebf0; --muted: #98a4b1; --accent: #6fa3d3; --accent-fg: #0b1015;
-    --head: #0b1015;
+    --bg: #10151b; --paper: #19212a; --line: #313c48; --line-soft: #242d37; --thead: #1f2832;
+    --fg: #e6ebf0; --muted: #98a4b1; --accent: #6aa7e8; --accent-hover: #8dbcef; --accent-fg: #0b1015;
+    --signal: #ff7a2e; --grid: rgba(110, 170, 230, .045); --tick: rgba(110, 170, 230, .4);
+    --pause: #e0b43a; --head: #0b1015;
     color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }  /* kitaip display: grid nugali hidden ir paslėptas langas dengia mygtukus */
 html, body { margin: 0; }
-body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-body); }
+/* brėžinio tinklelis fone: 24 px langeliai, kas 5-as ryškesnis – kaip milimetrinis popierius */
+body { background-color: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-body);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px; }
 a { color: var(--accent); }
 h1, h2, h3 { margin: 0; line-height: 1.25; text-wrap: balance; }
-h1 { font-size: 24px; } h2 { font-size: 18px; } h3 { font-size: 15px; }
+h1 { font-size: 24px; font-weight: 650; letter-spacing: -.01em; } h2 { font-size: 18px; } h3 { font-size: 15px; }
+/* kortelės antraštė – oranžinė atskaitos žymė, kaip bazė brėžinyje */
+.card h2::before, .rcard h2::before { content: ""; display: inline-block; width: 8px; height: 8px; background: var(--signal);
+  margin-right: 9px; vertical-align: 2px; }
 .muted { color: var(--muted); }
 .pad { padding: 24px; }
 .mono, code { font-family: var(--f-mono); font-size: .9em; }
 td.num, .nw { white-space: nowrap; }  /* datos ir užsakymų nr. nelūžta per eilutę */
 .num { font-variant-numeric: tabular-nums; }
 
-header#top { background: var(--head); color: var(--head-fg); position: sticky; top: 0; z-index: 5; }
-.bar { display: flex; align-items: center; gap: 18px; padding: 8px 16px; flex-wrap: wrap; }
-.brand { color: var(--head-fg); font-weight: 700; letter-spacing: .08em; text-decoration: none; font-size: 17px; }
-nav { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
-nav a { color: var(--head-fg); opacity: .78; text-decoration: none; padding: 6px 10px; border-radius: 4px; font-size: 14px; }
-nav a:hover { opacity: 1; background: rgba(255,255,255,.08); }
-nav a.on { opacity: 1; background: rgba(255,255,255,.14); }
+header#top { background: var(--head); color: var(--head-fg); position: sticky; top: 0; z-index: 5; border-bottom: 3px solid var(--signal); }
+.bar { display: flex; align-items: center; gap: 14px; padding: 8px 16px; flex-wrap: wrap; }
+.brand { color: var(--head-fg); font-weight: 700; letter-spacing: .12em; text-decoration: none; font-size: 17px;
+  display: inline-flex; align-items: center; gap: 8px; }
+.brand svg { width: 24px; height: 24px; color: var(--signal); flex: none; }
+nav { display: flex; gap: 2px; flex-wrap: wrap; flex: 1; }
+nav a { color: var(--head-fg); opacity: .78; text-decoration: none; padding: 6px 8px; border-radius: 2px; font-size: 14px; }
+nav a:hover { opacity: 1; background: rgba(255,255,255,.07); }
+nav a.on { opacity: 1; background: rgba(255,255,255,.08); box-shadow: inset 0 -2px 0 var(--signal); }
 .who { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .who .ghost { color: var(--head-fg); border-color: rgba(255,255,255,.3); }
+.who .ghost:hover { background: rgba(255,255,255,.08); color: var(--head-fg); }
 
 main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 18px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
-.card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 14px; display: grid; gap: 10px; min-width: 0; align-content: start; }
+/* kortelė – kaip brėžinio lapas: kampų žymės viršuje kairėje ir apačioje dešinėje */
+.card { --cbg: var(--paper); border: 1px solid var(--line); border-radius: 2px; padding: 14px; display: grid; gap: 10px; min-width: 0; align-content: start;
+  background: linear-gradient(var(--tick), var(--tick)) top left / 14px 2px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) top left / 2px 14px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 14px 2px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 2px 14px no-repeat, var(--cbg); }
 .card > *, main > * { min-width: 0; }  /* tinklelio vaikas be šito išsiplečia pagal plačią lentelę */
 
-button, .btn { font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 5px; border: 1px solid var(--accent);
+button, .btn { font: inherit; font-size: 14px; font-weight: 500; padding: 7px 12px; border-radius: 3px; border: 1px solid var(--accent);
   background: var(--accent); color: var(--accent-fg); cursor: pointer; text-decoration: none; display: inline-block; }
+button:hover:not(:disabled), .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.ghost, .btn.ghost { background: transparent; color: var(--accent); }
+button.ghost:hover:not(:disabled), .btn.ghost:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
 button.small { padding: 3px 8px; font-size: 13px; }
 button:disabled { opacity: .45; cursor: not-allowed; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--ready); outline-offset: 2px; }
-input, select, textarea { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px;
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+input, select, textarea { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 2px;
   background: var(--paper); color: var(--fg); min-width: 0; }
 textarea { width: 100%; min-height: 70px; }
 label { display: grid; gap: 3px; font-size: 13px; color: var(--muted); }
 form.inline { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
 
-.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 2px; background: var(--paper); }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { text-align: left; padding: 7px 10px; border-top: 1px solid var(--line-soft); vertical-align: top; }
-thead th { border-top: 0; background: var(--line-soft); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); white-space: nowrap; }
+thead th { border-top: 0; border-bottom: 2px solid var(--line); background: var(--thead); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); white-space: nowrap; }
+td.num, td .num { font-family: var(--f-mono); font-size: 13px; }
 tr.click { cursor: pointer; } tr.click:hover { background: var(--line-soft); }
 tr.dim td { color: var(--muted); }
 
-.pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+/* būsena – kaip indikatoriaus lemputė įrenginio pulte */
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px 1px 6px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap;
+  background: color-mix(in srgb, currentColor 7%, transparent); }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .s-dirba, .s-vykdoma, .s-baigta { color: var(--ok); }
 .s-pristabdyta { color: var(--pause); }
 .s-laukia, .s-planuota, .s-tuscia, .s-krepselis { color: var(--wait); }
@@ -101,34 +128,47 @@ section.area { display: grid; gap: 10px; }
 .area-h { border-bottom: 2px solid var(--line); padding-bottom: 6px; }
 .tm h2 { margin-top: 6px; }
 .floor { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
-.wc { background: var(--paper); border: 1px solid var(--line); border-top: 5px solid var(--wait); border-radius: 6px; padding: 12px; display: grid; gap: 6px; text-decoration: none; color: inherit; }
+.wc { background: var(--paper); border: 1px solid var(--line); border-top: 4px solid var(--wait); border-radius: 2px; padding: 12px; display: grid; gap: 6px; align-content: start; text-decoration: none; color: inherit; }
+.wc:hover { border-color: var(--accent); }
+.wc.dirba .pill::before { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent); }  /* dirbantis centras „šviečia“ */
 .wc.dirba { border-top-color: var(--ok); } .wc.pristabdyta { border-top-color: var(--pause); }
 .wc.gali { border-top-color: var(--ready); } .wc.laukia { border-top-color: var(--wait); }
 .wc .t { font-family: var(--f-mono); font-size: 22px; font-variant-numeric: tabular-nums; }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
-.tile { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
-.tile b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.tile { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 2px; padding: 12px; }
+.tile b { display: block; font-size: 24px; font-family: var(--f-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
 .hbar { height: 10px; background: var(--line-soft); border-radius: 2px; overflow: hidden; display: flex; min-width: 120px; }
 .hbar i { display: block; height: 100%; } .hbar .w { background: var(--ok); } .hbar .p { background: var(--pause); }
 
 #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 20; padding: 16px; }
-#modal .box { background: var(--paper); color: var(--fg); border-radius: 8px; padding: 18px; width: min(560px, 100%); max-height: 90vh; overflow: auto; display: grid; gap: 12px; }
-#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--head); color: var(--head-fg); padding: 10px 16px; border-radius: 6px; z-index: 30; max-width: 90vw; }
-#toast.err { background: var(--bad); color: #fff; }
+#modal .box { background: var(--paper); color: var(--fg); border-radius: 3px; border-top: 3px solid var(--signal); padding: 18px; width: min(560px, 100%); max-height: 90vh; overflow: auto; display: grid; gap: 12px; }
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--head); color: var(--head-fg); padding: 10px 16px; border-radius: 2px; border-left: 4px solid var(--ok); z-index: 30; max-width: 90vw; }
+#toast.err { background: var(--bad); color: #fff; border-left-color: #7d1a12; }
 
-/* prisijungimas */
-.login { max-width: 420px; margin: 8vh auto; }
+/* prisijungimas: kairėje – robotinės rankos brėžinys, dešinėje – forma */
+.login { max-width: 860px; width: 100%; margin: 7vh auto; display: grid; grid-template-columns: 1.1fr 1fr; gap: 0; padding: 0; }
+.login .hero { background: var(--head); color: var(--head-fg); padding: 26px; display: grid; gap: 12px; align-content: space-between;
+  background-image: linear-gradient(rgba(110,170,230,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(110,170,230,.08) 1px, transparent 1px);
+  background-size: 20px 20px; }
+.login .hero svg { width: 100%; height: auto; max-height: 260px; }
+.login .hero .brand { font-size: 26px; }
+.login .hero .brand svg { width: 34px; height: 34px; }
+.login .hero p { margin: 0; color: #aeb9c5; font-size: 14px; }
+.login .tblock { font-family: var(--f-mono); font-size: 11px; color: #8d9aa8; border-top: 1px solid rgba(255,255,255,.18); padding-top: 8px;
+  display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.login .form { padding: 26px; display: grid; gap: 12px; align-content: start; }
+@media (max-width: 720px) { .login { grid-template-columns: 1fr; margin: 0 auto; } .login .hero svg { max-height: 150px; } }
 .pinpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .pinpad button { font-size: 22px; padding: 14px; }
 .pindots { font-family: var(--f-mono); font-size: 28px; letter-spacing: .4em; text-align: center; min-height: 40px; }
 
-/* terminalas – visada tamsus, dideli mygtukai jutikliniam ekranui */
-body.term { background: #10161c; color: #e7edf2; }
+/* terminalas – visada tamsus (kaip staklių pultas), dideli mygtukai jutikliniam ekranui */
+body.term { background-color: #10161c; color: #e7edf2; --grid: rgba(110, 170, 230, .045); --signal: #ff7a2e; }
 body.term header#top { background: #0a0f14; }
 body.term main { max-width: 1100px; }
 .tm { display: grid; gap: 14px; }
-.tm .card { background: #18212a; border-color: #2c3844; color: #e7edf2; }
+.tm .card { --cbg: #18212a; --tick: rgba(255, 122, 46, .55); border-color: #2c3844; color: #e7edf2; }
 .tm .muted { color: #9aa7b4; }
 .tm .now { border-left: 6px solid var(--ok); }
 .tm .now.paused { border-left-color: var(--pause); }
@@ -158,24 +198,24 @@ body.term main { max-width: 1100px; }
 /* projekto kortelės */
 nav.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 2px solid var(--line); }
 nav.tabs a { padding: 8px 14px; text-decoration: none; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -2px; }
-nav.tabs a.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+nav.tabs a.on { color: var(--fg); border-bottom-color: var(--signal); font-weight: 600; }
 .cnt { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; text-align: center; color: #fff; background: var(--wait); }
 .cnt.bad { background: var(--bad); }
 
 /* sveikata: spalva – tik lygio prasmė */
-:root { --h-green: #2a8a4a; --h-yellow: #c27a0e; --h-red: #c23a2b; }
+:root { --h-green: #23854a; --h-yellow: #a87800; --h-red: #c9372c; }  /* geltona – ochra, ne ženklo oranžinė */
 .hbadge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; color: #fff; white-space: nowrap; }
 .hbadge.h-green { background: var(--h-green); } .hbadge.h-yellow { background: var(--h-yellow); } .hbadge.h-red { background: var(--h-red); }
 .hdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
 .hdot.h-green { background: var(--h-green); } .hdot.h-yellow { background: var(--h-yellow); } .hdot.h-red { background: var(--h-red); }
 .dims { margin-top: 4px; }
-.hsum { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center; background: var(--paper); border: 1px solid var(--line); border-left: 8px solid var(--wait); border-radius: 6px; padding: 14px 18px; }
+.hsum { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center; background: var(--paper); border: 1px solid var(--line); border-left: 8px solid var(--wait); border-radius: 2px; padding: 14px 18px; }
 .hsum.h-green { border-left-color: var(--h-green); } .hsum.h-yellow { border-left-color: var(--h-yellow); } .hsum.h-red { border-left-color: var(--h-red); }
 .hsum p { margin: 0; color: var(--muted); font-size: 13px; max-width: 70ch; }
 .hbig { font-size: 30px; font-weight: 700; line-height: 1.1; }
 .hsum.h-green .hbig { color: var(--h-green); } .hsum.h-yellow .hbig { color: var(--h-yellow); } .hsum.h-red .hbig { color: var(--h-red); }
 .hgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.hcard { background: var(--paper); border: 1px solid var(--line); border-top: 5px solid var(--wait); border-radius: 6px; padding: 12px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.hcard { background: var(--paper); border: 1px solid var(--line); border-top: 5px solid var(--wait); border-radius: 2px; padding: 12px; display: grid; gap: 8px; align-content: start; min-width: 0; }
 .hcard.h-green { border-top-color: var(--h-green); } .hcard.h-yellow { border-top-color: var(--h-yellow); } .hcard.h-red { border-top-color: var(--h-red); }
 .hhead { font-weight: 600; }
 .hfig { font-size: 13px; color: var(--muted); }
@@ -185,9 +225,9 @@ nav.tabs a.on { color: var(--fg); border-bottom-color: var(--accent); font-weigh
 
 /* Kanban */
 .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; overflow-x: auto; align-items: start; }
-.col { background: var(--line-soft); border-radius: 6px; padding: 8px; display: grid; gap: 8px; align-content: start; min-height: 120px; }
+.col { background: var(--line-soft); border-radius: 2px; padding: 8px; display: grid; gap: 8px; align-content: start; min-height: 120px; }
 .colh { font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; }
-.acard { background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 5px; padding: 8px; display: grid; gap: 4px; cursor: pointer; font-size: 13px; }
+.acard { background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 2px; padding: 8px; display: grid; gap: 4px; cursor: pointer; font-size: 13px; }
 .acard:hover, .acard:focus-visible { border-color: var(--accent); outline: none; }
 .acard.late { border-left-color: var(--bad); }
 .acard b { font-size: 14px; }
@@ -201,7 +241,7 @@ nav.tabs a.on { color: var(--fg); border-bottom-color: var(--accent); font-weigh
 .momgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .momgrid div { display: grid; }
 pre.txt { white-space: pre-wrap; font: inherit; margin: 0; }
-fieldset { border: 1px solid var(--line); border-radius: 6px; display: grid; gap: 8px; padding: 10px; }
+fieldset { border: 1px solid var(--line); border-radius: 2px; display: grid; gap: 8px; padding: 10px; }
 legend { font-weight: 600; padding: 0 6px; }
 .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 12px; }
 label.chk { display: flex; gap: 6px; align-items: center; color: var(--fg); font-size: 14px; }
@@ -241,18 +281,19 @@ svg.chart .caplbl { fill: var(--bad); font-size: 11px; font-weight: 600; }
 .scan { width: 240px; font-size: 14px; }
 .tm .hit { outline: 3px solid #f0b45a !important; outline-offset: 4px; border-radius: 4px; }
 .move { display: grid; gap: 14px; text-align: left; }
-.move .dest { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; border: 2px solid var(--ok); border-radius: 8px; padding: 12px 16px; }
+.move .dest { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; border: 2px solid var(--ok); border-radius: 3px; padding: 12px 16px; }
 .move .arrow { font-size: 44px; line-height: 1; color: var(--ok); }
 .move .big-c { font-size: 34px; font-weight: 700; line-height: 1.1; }
 .move button { font-size: 20px; padding: 14px; border: 0; color: #fff; }
 .flowmap { display: grid; gap: 10px; }
-.lane { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: grid; gap: 6px; min-width: 0; }
-.lane.sel { box-shadow: inset 4px 0 0 var(--accent); }
-.lane.main { border-width: 2px; }
+/* srauto atšaka; ne .lane – tą jau naudoja etapų grafikas (.gantt .lane) */
+.flane { border: 1px solid var(--line); border-radius: 2px; padding: 8px 10px; display: grid; gap: 6px; min-width: 0; }
+.flane.sel { box-shadow: inset 4px 0 0 var(--accent); }
+.flane.main { border-width: 2px; }
 .lane-h { font-size: 13px; color: var(--muted); }
 .lane-h b { color: var(--fg); }
 .ops { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; }
-.op { border: 1px solid var(--line); border-left: 5px solid var(--wait); border-radius: 5px; padding: 6px 8px; min-width: 150px; max-width: 220px; background: var(--paper); display: grid; gap: 2px; align-content: start; font-size: 13px; }
+.op { border: 1px solid var(--line); border-left: 5px solid var(--wait); border-radius: 2px; padding: 6px 8px; min-width: 150px; max-width: 220px; background: var(--paper); display: grid; gap: 2px; align-content: start; font-size: 13px; }
 .op.st-vykdoma { border-left-color: var(--ok); } .op.st-pristabdyta { border-left-color: var(--pause); }
 .op.st-baigta { border-left-color: var(--ok); opacity: .7; }
 .op.end { border-style: dashed; border-left-width: 1px; justify-content: center; align-content: center; color: var(--muted); }
@@ -260,7 +301,7 @@ svg.chart .caplbl { fill: var(--bad); font-size: 11px; font-weight: 600; }
 .arr { align-self: center; color: var(--muted); font-size: 18px; }
 .join { color: var(--muted); font-size: 13px; padding-left: 12px; }
 .rcards { display: grid; gap: 16px; }
-.rcard { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.rcard { background: var(--paper); border: 1px solid var(--line); border-radius: 2px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
 .rc-head { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
 .rcard .qr { width: 132px; height: 132px; background: #fff; }
 .rcard table { width: 100%; border-collapse: collapse; }
@@ -285,6 +326,8 @@ svg.chart .caplbl { fill: var(--bad); font-size: 11px; font-weight: 600; }
 .pcard.drag { opacity: .4; }
 .pdone { width: 18px; height: 18px; margin-top: 2px; flex: none; }
 .padd { justify-self: start; }
-.hbar { height: 6px; background: var(--paper); border-radius: 3px; overflow: hidden; }
-.hbar i { display: block; height: 100%; background: var(--ok); }
-.hbar.over i { background: var(--bad); }
+/* dienos užimtumas; ne .hbar – tas jau užimtas analitikos juostai */
+.dbar { height: 6px; background: var(--paper); border-radius: 1px; overflow: hidden; }
+.dbar i { display: block; height: 100%; background: var(--ok); }
+.dbar.over i { background: var(--bad); }
+.stack { display: grid; gap: 10px; }

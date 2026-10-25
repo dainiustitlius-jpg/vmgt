@@ -271,6 +271,28 @@ kategoriją.
   karto (PrefabFlow laikė patvirtintą tvarką atskirai).
 - MS SQL – schema paprasta, kad perkelti būtų nesunku.
 
+## Vizualinis stilius (nuo 2026-10-25)
+
+Vartotojo sprendimas: **šviesus inžinerinis** stilius (kaip CAD brėžinys ir
+technologinė dokumentacija), logotipas – **paprastas ženklas + VMGT**.
+
+- Spalvos – `app.css` `:root`. Brėžinio mėlyna `--accent` – mygtukai,
+  nuorodos. Signalinė oranžinė `--signal` – TIK ženklas ir žymekliai:
+  logotipas, juosta po antrašte, aktyvus meniu ir kortelė, antraštės žymė,
+  fokusas. Būsenai oranžinė nenaudojama: pristabdyta / „dėmesio“ – ochra
+  (`--pause`, `--h-yellow` #a87800), kitaip nesiskirtų nuo ženklo.
+- Fonas – brėžinio tinklelis (24 px, kas 120 px ryškesnis). Kortelės – kampų
+  žymės (`--tick`) ir oranžinis kvadratėlis prie antraštės. Būsenų žymos –
+  „indikatoriaus lemputė“ (`.pill::before`). Kampai 2–3 px, skaičiai lentelėse
+  – vienodo pločio šriftu.
+- Logotipas – stilizuota robotinės rankos jungtis (SVG `index.html`, taip pat
+  favicon). Prisijungimo lange – robotinės rankos brėžinys (`ARM_SVG`).
+- Terminalas lieka tamsus (staklių pultas), su oranžinėmis kampų žymėmis.
+  Tamsus režimas – pagal sistemos nustatymą (`prefers-color-scheme`).
+- Rasta perdarant: srauto atšakų `.lane` sutapo su `.gantt .lane` (iškraipė
+  etapų grafiką) → `.flane`; savaitės plano `.hbar` perrašė analitikos juostą
+  → `.dbar`. Naujoms klasėms tikrinti, ar pavadinimas dar neužimtas.
+
 ## UI pastaba
 
 `.card > *, main > * { min-width: 0 }` – tinklelio vaikas be šito išsiplečia

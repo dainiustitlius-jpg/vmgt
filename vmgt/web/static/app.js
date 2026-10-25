@@ -137,22 +137,48 @@ function renderNav() {
 $("#logout").onclick = async () => { await POST("/api/logout").catch(() => {}); S.me = null; location.hash = "#/login"; route(); };
 
 // ---------- prisijungimas ----------
+// Prisijungimo lango iliustracija – robotinės rankos brėžinys: kontūrai
+// brėžinio mėlyna, jungtys oranžinės, judesio zona ir matmuo – kaip CAD lape
+const ARM_SVG = `<svg viewBox="0 0 360 250" fill="none" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Robotinės rankos brėžinys">
+  <g stroke="#6aa7e8" stroke-width="1.6">
+    <path d="M20 220H340"/>
+    <path d="M95 40A130 130 0 0 1 225 170" stroke-dasharray="4 5" opacity=".55"/>
+    <path d="M95 150V232M85 170h20" stroke-dasharray="10 3 2 3" opacity=".5"/>
+    <rect x="60" y="198" width="70" height="22" rx="2"/><rect x="76" y="180" width="38" height="18" rx="2"/>
+    <rect x="-9" y="-68" width="18" height="136" rx="9" transform="translate(135 125) rotate(41.6)"/>
+    <rect x="-61" y="-7.5" width="122" height="15" rx="7.5" transform="translate(225 92.5) rotate(14)"/>
+    <path d="M275 112v14M264 126h22M266 126v15M284 126v15"/>
+    <rect x="252" y="198" width="46" height="22" rx="1"/><path d="M252 209h46" opacity=".5"/>
+    <path d="M95 238H275M95 233v10M275 233v10M95 238l7-3v6zM275 238l-7-3v6z"/>
+  </g>
+  <g stroke="#ff7a2e" stroke-width="2"><circle cx="95" cy="170" r="12"/><circle cx="175" cy="80" r="10"/><circle cx="275" cy="105" r="7"/></g>
+  <g fill="#ff7a2e"><circle cx="95" cy="170" r="2.5"/><circle cx="175" cy="80" r="2.5"/><circle cx="275" cy="105" r="2"/></g>
+  <g fill="#8d9aa8" font-family="Consolas, monospace" font-size="10"><text x="112" y="188">J1</text><text x="190" y="72">J2</text><text x="286" y="100">J3</text>
+    <text x="168" y="232">R 1200</text><text x="236" y="56">±170°</text></g>
+</svg>`;
+
 async function pageLogin() {
   $("#top").hidden = true;
   app().innerHTML = `
   <div class="login card">
-    <h1>VMGT</h1>
-    <p class="muted">Projektų stebėsena ir gamybos valdymas</p>
-    <div class="row"><button id="tab-pw">Vardas ir slaptažodis</button><button id="tab-pin" class="ghost">PIN (terminalas)</button></div>
-    <form id="f-pw" class="card" style="border:0;padding:0">
-      <label>Prisijungimo vardas<input name="login" autocomplete="username" required id="lg-login"></label>
-      <label>Slaptažodis<input name="password" type="password" autocomplete="current-password" required id="lg-pass"></label>
-      <button>Prisijungti</button>
-    </form>
-    <div id="f-pin" hidden>
-      <div class="pindots" id="pindots"></div>
-      <div class="pinpad">${[1,2,3,4,5,6,7,8,9].map(n => `<button class="ghost" data-n="${n}">${n}</button>`).join("")}
-        <button class="ghost" data-n="C">⌫</button><button class="ghost" data-n="0">0</button><button data-n="OK">OK</button></div>
+    <div class="hero">
+      <div><span class="brand">${$("#top .brand svg").outerHTML}VMGT</span><p>Projektų stebėsena ir gamybos valdymas</p></div>
+      ${ARM_SVG}
+      <div class="tblock"><span>VIENETINĖ METALO GAMYBA</span><span>PJOVIMAS → SUVIRINIMAS → SURINKIMAS → TESTAVIMAS</span></div>
+    </div>
+    <div class="form">
+      <h2>Prisijungimas</h2>
+      <div class="row"><button id="tab-pw">Vardas ir slaptažodis</button><button id="tab-pin" class="ghost">PIN (terminalas)</button></div>
+      <form id="f-pw" class="stack">
+        <label>Prisijungimo vardas<input name="login" autocomplete="username" required id="lg-login"></label>
+        <label>Slaptažodis<input name="password" type="password" autocomplete="current-password" required id="lg-pass"></label>
+        <button>Prisijungti</button>
+      </form>
+      <div id="f-pin" hidden>
+        <div class="pindots" id="pindots"></div>
+        <div class="pinpad">${[1,2,3,4,5,6,7,8,9].map(n => `<button class="ghost" data-n="${n}">${n}</button>`).join("")}
+          <button class="ghost" data-n="C">⌫</button><button class="ghost" data-n="0">0</button><button data-n="OK">OK</button></div>
+      </div>
     </div>
   </div>`;
   const done = r => { S.me = null; location.hash = r.perms.includes("view") ? "#/" : "#/t"; };
@@ -513,7 +539,7 @@ async function pageMyWeek(start) {
   <div class="board week">
     ${col("", `<div class="colh">Neplanuota <span class="muted">${w.unplanned.length}</span></div>`, w.unplanned)}
     ${days.map(d => col(d.date, `<div class="colh">${esc(d.label)} <span class="muted">${fmtD(d.date)}</span></div>
-      <div class="hbar ${d.over ? "over" : ""}" title="${d.hours} iš ${d.capacity} val."><i style="width:${Math.min(100, d.hours / d.capacity * 100)}%"></i></div>
+      <div class="dbar ${d.over ? "over" : ""}" title="${d.hours} iš ${d.capacity} val."><i style="width:${Math.min(100, d.hours / d.capacity * 100)}%"></i></div>
       <div class="small ${d.over ? "s-late" : "muted"}">${String(d.hours).replace(".", ",")} / ${d.capacity} val.${d.over ? " – per daug" : ""}</div>`, d.items, `${d.today ? "today" : ""} ${d.past ? "past" : ""}`, d.past)).join("")}
     ${col(shift(7), `<div class="colh">Vėliau <span class="muted">${w.later.length}</span></div>`, w.later)}
   </div>`;
@@ -930,7 +956,7 @@ async function pageRoute(aid, part) {
   part = part ? decodeURIComponent(part) : "";
   const r = await GET(`/api/route/${aid}`);
   const a = r.assembly, edit = can("release");
-  const lanes = r.branches.map(b => `<div class="lane ${part && b.part === part ? "sel" : ""}">
+  const lanes = r.branches.map(b => `<div class="flane ${part && b.part === part ? "sel" : ""}">
       <div class="lane-h">Detalė <b class="mono">${esc(b.part)}</b> ${b.done ? pill("baigta", "atšaka baigta") : ""}</div>
       <div class="ops">${laneOps(b.ops)}${r.main ? "" : `<span class="arr">→</span><div class="op end">${b.next.map(destText).join("<br>")}</div>`}</div></div>`).join("");
   app().innerHTML = `
@@ -949,7 +975,7 @@ async function pageRoute(aid, part) {
     ${r.requires.length ? `<p>Į šį mazgą ateina: ${r.requires.map(x => `<a href="#/r/${x.id}" class="mono">${esc(x.code)}</a> ${esc(x.name)} ${x.done ? "✓" : "…"}`).join(", ")}</p>` : ""}
     <div class="flowmap">${lanes || ""}
       ${r.main ? `${r.branches.length ? `<div class="join">⤵ ${r.branches.length > 1 ? `${r.branches.length} detalės susilieja` : "detalė keliauja"} į mazgą</div>` : ""}
-      <div class="lane main ${!part ? "sel" : ""}"><div class="lane-h">Mazgas <b class="mono">${esc(a.code)}</b> ${r.main.done ? pill("baigta", "baigtas") : ""}</div>
+      <div class="flane main ${!part ? "sel" : ""}"><div class="lane-h">Mazgas <b class="mono">${esc(a.code)}</b> ${r.main.done ? pill("baigta", "baigtas") : ""}</div>
         <div class="ops">${laneOps(r.main.ops)}<span class="arr">→</span><div class="op end">${r.main.next.map(destText).join("<br>")}</div></div></div>` : ""}
       ${!r.main && !r.branches.length ? `<p class="muted">Operacijų dar nėra.</p>` : ""}</div></div>
   <div class="card"><h2>Perdavimai</h2>

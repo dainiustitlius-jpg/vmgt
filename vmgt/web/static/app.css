@@ -331,3 +331,19 @@ svg.chart .caplbl { fill: var(--bad); font-size: 11px; font-weight: 600; }
 .dbar i { display: block; height: 100%; background: var(--ok); }
 .dbar.over i { background: var(--bad); }
 .stack { display: grid; gap: 10px; }
+
+/* technologo failai: chip – failas, oranžinis kraštas – nauja versija, laukianti meistro */
+.files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.files .path { flex-basis: 100%; font-family: var(--f-mono); }
+.fchip { display: inline-flex; gap: 4px; align-items: baseline; font-size: 13px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 2px;
+  background: var(--paper); text-decoration: none; color: var(--fg); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip:hover { border-color: var(--accent); }
+.fchip.new { border-color: var(--pause); box-shadow: inset 3px 0 0 var(--pause); }
+.tm .fchip { background: #223040; border-color: #3a4a5c; color: #e7edf2; font-size: 15px; padding: 6px 10px; }
+.tm .files .path { color: #9aa7b4; }
+table.tedit td { vertical-align: middle; }
+table.tedit input:disabled, table.tedit select:disabled { background: transparent; border-color: transparent; color: var(--fg); }
+.fcell { min-width: 220px; }
+.fcell.over { outline: 2px dashed var(--accent); outline-offset: -3px; }
+.frow { display: flex; gap: 4px; align-items: center; margin-bottom: 3px; }
+.upl { font-size: 13px; padding: 2px 8px; cursor: pointer; }

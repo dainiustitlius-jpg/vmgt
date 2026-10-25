@@ -370,6 +370,28 @@ MIGRATIONS: list[str] = [
     CREATE INDEX ix_actions_plan ON actions (owner_id, plan_date);
     PRAGMA foreign_keys = ON;
     """,
+    # 9 – technologo failai prie operacijų (DXF, NC, robotų ir PLC programos)
+    """
+    ALTER TABLE work_centres ADD COLUMN needs_files INTEGER NOT NULL DEFAULT 0;  -- staklės, kurioms reikia programos
+    CREATE TABLE task_files (
+        id INTEGER PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES tasks(id),
+        name TEXT NOT NULL,                    -- originalus pavadinimas: pagal jį skaičiuojamos versijos
+        version INTEGER NOT NULL,
+        path TEXT NOT NULL,                    -- santykinis nuo nc_dir: projektas/mazgas/centras/failas_vN.ext
+        kind TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        current INTEGER NOT NULL DEFAULT 1,    -- 0 – senesnė versija arba pašalintas
+        needs_ack INTEGER NOT NULL DEFAULT 0,  -- pakeistas po išleidimo: meistras turi patvirtinti
+        uploaded_by INTEGER REFERENCES users(id),
+        uploaded_at TEXT NOT NULL,
+        acked_by INTEGER REFERENCES users(id),
+        acked_at TEXT
+    );
+    CREATE INDEX ix_task_files ON task_files (task_id, current);
+    """,
 ]
 
 

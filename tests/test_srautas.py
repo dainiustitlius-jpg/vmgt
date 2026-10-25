@@ -139,6 +139,11 @@ def test_api(sample_client):
     r = c.get(f"/api/route/{a['id']}").json()
     assert not r["released"] and [b["part"] for b in r["branches"]] == ["2210-201", "2210-202"]
     assert [o["centre_code"] for o in r["main"]["ops"]] == ["SV-03", "DAZ-02"]
+    # lenkimo presui (LNK-01) programos dar nėra – išleisti negalima
+    rel = c.post(f"/api/route/{a['id']}/release")
+    assert rel.status_code == 409 and "nepridėtas programos" in rel.json()["detail"]
+    lnk = next(o for o in r["branches"][1]["ops"] if o["centre_code"] == "LNK-01")
+    assert c.post(f"/api/tasks/{lnk['id']}/files", files={"file": ("2210-202.nc", b"M30\n")}).status_code == 200
     assert c.post(f"/api/route/{a['id']}/release").status_code == 200
     assert c.get(f"/api/route/{a['id']}").json()["released"]
     assert c.get("/api/qr", params={"data": "http://x/#/r/1"}).text.startswith("<svg")

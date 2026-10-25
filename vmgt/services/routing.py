@@ -25,7 +25,7 @@ STORE = "Mazgas baigtas – į sandėlį / išsiuntimui"
 _OPS_SQL = (
     "SELECT t.id, t.assembly_id, t.project_id, t.seq, t.name, t.part_no, t.qty_plan, t.qty_good, t.qty_scrap, "
     "t.norm_min, t.status, t.approved, t.drawing_no, t.drawing_rev, t.centre_id, "
-    "c.code AS centre_code, c.name AS centre_name, ar.code AS area_code, ar.name AS area_name "
+    "c.code AS centre_code, c.name AS centre_name, c.needs_files, ar.code AS area_code, ar.name AS area_name "
     "FROM tasks t JOIN work_centres c ON c.id=t.centre_id LEFT JOIN areas ar ON ar.id=c.area_id ")
 
 
@@ -143,6 +143,11 @@ def arrived(t: dict, ups: list[dict]) -> int | None:
 
 # ---------- išleidimas į gamybą ----------
 
+def _files(con, ops) -> dict:
+    from .ncfiles import list_for
+    return list_for(con, [o["id"] for o in ops])
+
+
 def check(con, assembly_id) -> dict:
     """Ar maršrutą galima išleisti. Klaidos draudžia, įspėjimai – ne."""
     st = structure(con, assembly_id)
@@ -158,7 +163,12 @@ def check(con, assembly_id) -> dict:
                           f"operacijas – detalių operacijų seka turi būti mažesnė")
     if len(st["branches"]) > 1 and not st["main"]:
         warnings.append("Kelios detalės, bet nėra mazgo operacijos (be detalės kodo) – atšakos niekur nesusilieja")
+    files = _files(con, ops)
     for o in ops:
+        # staklėms be programos pjauti nėra kuo – tai klaida, ne įspėjimas
+        if o["needs_files"] and not files[o["id"]]:
+            part = f" ({o['part_no']})" if o["part_no"] else ""
+            errors.append(f"{o['centre_code']} · {o['name']}{part}: nepridėtas programos / DXF failas")
         if not o["norm_min"]:
             warnings.append(f"{o['centre_code']} · {o['name']}: nenurodyta norma")
         if not o["drawing_no"]:
@@ -230,10 +240,12 @@ def trace(con, assembly_id) -> dict:
 
     a = _assembly(con, assembly_id)
     st = structure(con, assembly_id)
+    files = _files(con, [o for b in st["branches"] for o in b["ops"]] + st["main"])
 
     def lane(ops, part):
         out = []
         for i, o in enumerate(ops):
+            o["files"] = files[o["id"]]
             ups = upstream(con, o, st)
             o["here"] = _where(o, ups, i == 0)
             o["arrived"] = arrived(o, ups)
@@ -267,3 +279,72 @@ def trace(con, assembly_id) -> dict:
     return {"assembly": a, "released": bool(a["released_at"]), "branches": lanes, "main": main,
             "requires": feeds, "consumers": [{"id": r["id"], "code": r["code"], "name": r["name"]} for r in needs],
             "transfers": moves, "check": check(con, assembly_id)}
+
+
+# ---------- technologo darbo aplinka ----------
+
+def copy_route(con, nc_dir, user, from_assembly, to_assembly, with_files=True) -> dict:
+    """Nukopijuoti maršrutą iš panašaus mazgo – vienetinėje gamyboje dažnai
+    kartojasi tie patys sprendimai. Kiekiai perskaičiuojami pagal mazgų
+    kiekį (2 plokštės vienam rėmui → 12 šešiems)."""
+    from .ncfiles import copy_files
+    from .tasks import create_task
+
+    src, dst = _assembly(con, from_assembly), _assembly(con, to_assembly)
+    ensure_editable(con, to_assembly)
+    if from_assembly == to_assembly:
+        raise RuleError("Pasirinkite kitą mazgą")
+    ops = db.rows(con.execute("SELECT * FROM tasks WHERE assembly_id=? ORDER BY seq, id", (from_assembly,)))
+    if not ops:
+        raise RuleError(f"Mazgas {src['code']} neturi operacijų")
+    n = nf = 0
+    for o in ops:
+        per = o["qty_plan"] / max(1, src["qty"])
+        tid = create_task(con, user["id"], {
+            "project_id": dst["project_id"], "assembly_id": to_assembly, "centre_id": o["centre_id"],
+            "seq": o["seq"], "name": o["name"], "part_no": o["part_no"], "qty_plan": max(1, round(per * dst["qty"])),
+            "norm_min": o["norm_min"], "drawing_no": o["drawing_no"], "drawing_rev": o["drawing_rev"]})
+        n += 1
+        if with_files:
+            nf += copy_files(con, nc_dir, user, o["id"], tid)
+    db.log_event(con, user["id"], "assembly", to_assembly, "copy_route",
+                 {"from": f"{src['project_code']} {src['code']}", "ops": n, "files": nf})
+    return {"ops": n, "files": nf}
+
+
+def worklist(con, user_id=None) -> list[dict]:
+    """Technologo darbų sąrašas: neišleisti maršrutai ir kas jiems trukdo.
+    Vykdomų ir krepšelio projektų mazgai; `user_id` – tik tie, kurių
+    technologijos etapas priskirtas jam (arba visam projektui)."""
+    rows = db.rows(con.execute(
+        "SELECT a.id, a.code, a.name, a.qty, a.released_at, p.id AS project_id, p.code AS project_code, "
+        "p.name AS project_name, p.status AS project_status, p.priority, p.due_date "
+        "FROM assemblies a JOIN projects p ON p.id=a.project_id "
+        "WHERE p.status IN ('krepselis','vykdomas') ORDER BY p.priority, p.due_date IS NULL, p.due_date, p.code, a.sort"))
+    out = []
+    for a in rows:
+        ph = db.row(con.execute(
+            "SELECT ph.plan_end, ph.status, ph.owner_id, u.name AS owner_name FROM phases ph "
+            "LEFT JOIN users u ON u.id=ph.owner_id WHERE ph.project_id=? AND ph.kind='technologija' "
+            "AND (ph.assembly_id=? OR ph.assembly_id IS NULL) ORDER BY ph.assembly_id IS NULL LIMIT 1",
+            (a["project_id"], a["id"])))
+        if user_id and not (ph and ph["owner_id"] == user_id):
+            continue
+        st = structure(con, a["id"])
+        ops = [o for b in st["branches"] for o in b["ops"]] + st["main"]
+        files = _files(con, ops)
+        a.update({
+            "ops": len(ops), "parts": len(st["branches"]),
+            "no_norm": sum(1 for o in ops if not o["norm_min"]),
+            "no_file": sum(1 for o in ops if o["needs_files"] and not files[o["id"]]),
+            "files": sum(len(v) for v in files.values()),
+            "pending_ack": sum(1 for v in files.values() for f in v if f["needs_ack"]),
+            "tech_due": ph["plan_end"] if ph else None, "tech_owner": ph["owner_name"] if ph else None,
+            "tech_status": ph["status"] if ph else None,
+        })
+        a["state"] = "isleista" if a["released_at"] else "juodrastis" if ops else "nera"
+        a["state_label"] = {"isleista": "Išleista į gamybą", "juodrastis": "Juodraštis",
+                            "nera": "Nėra maršruto"}[a["state"]]
+        a["errors"] = 0 if a["released_at"] or not ops else len(check(con, a["id"])["errors"])
+        out.append(a)
+    return out

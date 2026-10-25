@@ -21,6 +21,12 @@ class Config:
     # tuščią bazę užpildyti pavyzdiniais duomenimis (testinė aplinka)
     seed_sample: bool = True
     session_hours: int = 12
+    # technologo failų (DXF, NC, programų) katalogas; gali būti tinklo diskas,
+    # kurį mato ir staklių kompiuteriai. Tuščia – data_dir/nc
+    nc_dir: str = ""
+    # kaip tą katalogą mato cecho kompiuteriai (pvz. \\serveris\NC) – rodoma
+    # terminale, kad operatorius rastų failą staklėse. Tuščia – nc_dir
+    nc_share: str = ""
     extra: dict = field(default_factory=dict)
 
     @property
@@ -30,6 +36,10 @@ class Config:
     @property
     def files_dir(self) -> Path:
         return Path(self.data_dir) / "files"
+
+    @property
+    def nc_path(self) -> Path:
+        return Path(self.nc_dir) if self.nc_dir else Path(self.data_dir) / "nc"
 
 
 def load(path: str | os.PathLike = "vmgt_config.json") -> Config:

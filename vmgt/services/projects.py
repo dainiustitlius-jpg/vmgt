@@ -297,12 +297,13 @@ def save_centre(con, by, data: dict, centre_id=None) -> int:
             raise RuleError(f"Kodas {data['code']} jau naudojamas barui")
         sort = con.execute("SELECT COALESCE(MAX(sort),0)+1 FROM work_centres").fetchone()[0]
         cur = con.execute(
-            "INSERT INTO work_centres (code, name, kind, manual, strict_order, sort, area_id) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO work_centres (code, name, kind, manual, strict_order, sort, area_id, needs_files) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (data["code"], data["name"], data.get("kind", "kita"), int(data.get("manual", 1)),
-             int(data.get("strict_order", 1)), sort, data.get("area_id") or None))
+             int(data.get("strict_order", 1)), sort, data.get("area_id") or None, int(data.get("needs_files", 0))))
         db.log_event(con, by, "centre", cur.lastrowid, "create", data)
         return cur.lastrowid
-    vals = {k: data[k] for k in ("name", "kind", "manual", "strict_order", "active") if k in data}
+    vals = {k: data[k] for k in ("name", "kind", "manual", "strict_order", "active", "needs_files") if k in data}
     if "area_id" in data:
         vals["area_id"] = data["area_id"] or None
     if vals:

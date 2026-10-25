@@ -10,7 +10,7 @@ atsakyti skirtingai.
 from __future__ import annotations
 
 from .. import db
-from . import NotFound, RuleError, components, routing
+from . import NotFound, RuleError, components, ncfiles, routing
 from .projects import PHASE_LABEL
 
 PAUSE_REASONS = [
@@ -200,6 +200,10 @@ def block_reason(con, t: dict) -> str | None:
     cur = current_revision(con, t["drawing_no"])
     if cur and t["drawing_rev"] and cur != t["drawing_rev"]:
         return f"Brėžinio {t['drawing_no']} revizija pasikeitė: {t['drawing_rev']} → {cur}. Reikia meistro patvirtinimo"
+    new = ncfiles.pending_ack(con, t["id"])
+    if new:
+        return ("Atnaujintas technologo failas: " + ", ".join(f"{f['name']} v{f['version']}" for f in new)
+                + ". Reikia meistro patvirtinimo")
     return None
 
 
@@ -377,7 +381,10 @@ def terminal_view(con, centre: dict) -> dict:
 
 
 def _flow(con, t) -> None:
-    """Iš kur detalės ateina ir kur keliaus – operatorius mato visą srautą."""
+    """Iš kur detalės ateina ir kur keliaus – operatorius mato visą srautą;
+    ir technologo failai, su kuriais dirbti."""
+    t["files"] = ncfiles.list_for(con, [t["id"]])[t["id"]]
+    t["files_pending"] = any(f["needs_ack"] for f in t["files"])
     st = routing.structure(con, t["assembly_id"])
     ups = routing.upstream(con, t, st)
     t["from"] = [{"centre_code": u["centre_code"], "name": u["name"], "part_no": u["part_no"],

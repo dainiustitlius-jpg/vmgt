@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import actions, auth, capacity, components, drawings, meetings, projects, routing, tasks
+from . import actions, auth, capacity, components, drawings, meetings, ncfiles, projects, routing, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -63,7 +63,27 @@ def is_empty(con) -> bool:
     return con.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
 
 
-def seed(con, files_dir: Path, today: datetime | None = None) -> None:
+# staklės, kurioms technologas turi pridėti programą / DXF (`needs_files`)
+NC_CENTRES = {"LAZ-01", "PLZ-01", "LNK-01", "CNC-01", "MECH-01", "PRG-01"}
+
+
+def _dxf(title: str, w: int, h: int) -> bytes:
+    """Mažiausias galiojantis DXF: stačiakampė išklotinė su skyle – pavyzdžiui."""
+    pts = [(0, 0), (w, 0), (w, h), (0, h)]
+    ents = ["0", "LWPOLYLINE", "8", "KONTURAS", "90", "4", "70", "1"]
+    for x, y in pts:
+        ents += ["10", str(x), "20", str(y)]
+    ents += ["0", "CIRCLE", "8", "SKYLES", "10", str(w // 2), "20", str(h // 2), "40", "11",
+             "0", "TEXT", "8", "ZYMES", "10", "5", "20", str(h + 5), "40", "5", "1", title]
+    return ("\n".join(["0", "SECTION", "2", "ENTITIES", *ents, "0", "ENDSEC", "0", "EOF"]) + "\n").encode()
+
+
+def _text(*lines: str) -> bytes:
+    return ("\n".join(lines) + "\n").encode()
+
+
+def seed(con, files_dir: Path, today: datetime | None = None, nc_dir: Path | None = None) -> None:
+    nc_dir = nc_dir or files_dir.parent / "nc"
     today = today or datetime.now(timezone.utc).replace(microsecond=0)
     real_clock = db._clock
 
@@ -94,7 +114,8 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
                                                  "headcount": area_people[acode]})
             for code, name, kind, manual in centres:
                 cid[code] = projects.save_centre(con, None, {"code": code, "name": name, "kind": kind,
-                                                             "manual": manual, "area_id": aid})
+                                                             "manual": manual, "area_id": aid,
+                                                             "needs_files": int(code in NC_CENTRES)})
         admin = {"id": uid["admin"], "centres": "[]"}
 
         # brėžiniai: 1023-100 turi dvi revizijas – dažymo užduotis sukurta su A
@@ -153,13 +174,13 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         task(p1, a1["100"], "DAZ-01", 40, "Dažymas RAL 7035", 1, 90, "1023-100", "A")
         k10 = task(p1, a1["200"], "LAZ-01", 10, "Šoninių plokščių pjovimas", 2, 20, "1023-200", "C", "1023-201")
         k20 = task(p1, a1["200"], "LNK-01", 20, "Šonų lenkimas", 2, 25, "1023-200", "C", "1023-201")
-        task(p1, a1["200"], "CNC-01", 30, "Velenų tekinimas", 4, 35, "1023-200", "C", "1023-210")
+        k30 = task(p1, a1["200"], "CNC-01", 30, "Velenų tekinimas", 4, 35, "1023-200", "C", "1023-210")
         task(p1, a1["200"], "SV-02", 40, "Konvejerio rėmo suvirinimas", 2, 150, "1023-200", "C")
         task(p1, a1["200"], "DAZ-02", 50, "Miltelinis dažymas RAL 5010", 2, 60, "1023-200", "C")
         task(p1, a1["300"], "EL-01", 10, "Spintos montavimas", 1, 480)
         task(p1, a1["900"], "SUR-01", 10, "Linijos mechaninis surinkimas", 1, 960, "1023-900", "A")
         task(p1, a1["900"], "EL-01", 20, "Elektros sujungimai", 1, 480, "1023-900", "A")
-        task(p1, a1["900"], "PRG-01", 25, "PLC ir robotų programų derinimas", 1, 600, "1023-900", "A")
+        prg = task(p1, a1["900"], "PRG-01", 25, "PLC ir robotų programų derinimas", 1, 600, "1023-900", "A")
         task(p1, a1["900"], "TST-01", 30, "Funkcinis testas, FAT", 1, 240, "1023-900", "A")
 
         # --- P-24121: dar neprasidėjęs gamyboje, eilė DAZ-01 nepatvirtinta ---
@@ -173,12 +194,12 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         phase(p2, None, "surinkimas", "meistras", 30, 40, 260, "TIS")
         phase(p2, None, "programavimas", "vadovas", 20, 40, 300)
         phase(p2, None, "testavimas", "kokybe", 40, 48, 80)
-        task(p2, a2["100"], "PLZ-01", 10, "Tvoros stulpų pjovimas", 6, 15, "2210-100", "B")
+        plz = task(p2, a2["100"], "PLZ-01", 10, "Tvoros stulpų pjovimas", 6, 15, "2210-100", "B")
         task(p2, a2["100"], "SV-02", 20, "Tvoros sekcijų suvirinimas", 6, 70, "2210-100", "B")
         task(p2, a2["100"], "DAZ-01", 30, "Dažymas RAL 1023", 6, 30, "2210-100", "B")
         # pozicionieriaus maršrutas – technologo juodraštis, dar neišleistas
         task(p2, a2["200"], "TEK-01", 10, "Ašies tekinimas", 1, 120, "2210-200", "A", "2210-201")
-        task(p2, a2["200"], "LAZ-01", 10, "Plokščių pjovimas", 4, 12, "2210-200", "A", "2210-202")
+        poz_laz = task(p2, a2["200"], "LAZ-01", 10, "Plokščių pjovimas", 4, 12, "2210-200", "A", "2210-202")
         task(p2, a2["200"], "LNK-01", 20, "Plokščių lenkimas", 4, 15, "2210-200", "A", "2210-202")
         task(p2, a2["200"], "SV-03", 30, "Pozicionieriaus suvirinimas", 1, 360, "2210-200", "A")
         task(p2, a2["200"], "DAZ-02", 40, "Miltelinis dažymas RAL 9005", 1, 60, "2210-200", "A")
@@ -191,6 +212,21 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         phase(p3, a3["100"], "gamyba", "meistras", 20, 35, 700, "SVB")
         phase(p3, a3["100"], "gamyba", "meistras", 33, 40, 160, "DZB")
 
+        # technologo failai – prieš išleidimą: staklėms be programos maršruto
+        # išleisti negalima. P-24121 200 lenkimui failo sąmoningai nėra
+        tech = {"id": uid["technologas"]}
+        for t_id, name, content in [
+                (r10, "1023-101.dxf", _dxf("1023-101 S355 t6", 1200, 400)),
+                (r10, "1023-101_lakstas.nc", _text("%", "O1023 (LAKSTAS 3000x1500 S355 t6)", "G90 G21", "M30", "%")),
+                (r20, "1023-101_lenkimas.nc", _text("; LENKIMAS 1023-101", "; 4 lenkimai, V16", "M30")),
+                (k10, "1023-201.dxf", _dxf("1023-201 S235 t3", 900, 300)),
+                (k20, "1023-201_lenkimas.nc", _text("; LENKIMAS 1023-201", "; 2 lenkimai, V12", "M30")),
+                (k30, "1023-210_velenas.mpf", _text("; VELENAS D40 L860", "G54", "M30")),
+                (prg, "K12_linija.scl", _text("FUNCTION_BLOCK FB_Konvejeris", "END_FUNCTION_BLOCK")),
+                (prg, "K12_paletes.mod", _text("MODULE Paletes", "ENDMODULE")),
+                (plz, "2210-101_stulpas.dxf", _dxf("2210-101 stulpas", 60, 1800)),
+                (poz_laz, "2210-202.dxf", _dxf("2210-202 plokste", 400, 400))]:
+            ncfiles.save(con, nc_dir, tech, t_id, name, content)
         for a in (a1["100"], a1["200"], a1["300"], a1["900"], a2["100"]):
             routing.release(con, uid["technologas"], a)
         for code, c in cid.items():
@@ -338,6 +374,10 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
                       drawings.sample_pdf(["PAVYZDYS  1023-100  rev. B", "Rėmas R-1200",
                                            "Pakeista: tvirtinimo skyles"]), "Rėmas R-1200")
         con.execute("UPDATE tasks SET drawing_rev='B' WHERE id IN (?,?,?)", (r10, r20, r30))
+        # technologas pataisė plazmos programą jau išleidus – PLZ-01 laukia meistro patvirtinimo
+        at(today - timedelta(hours=3))
+        ncfiles.save(con, nc_dir, tech, plz, "2210-101_stulpas.dxf", _dxf("2210-101 stulpas, skyles D13", 60, 1800),
+                     "Pakeistas tvirtinimo skylių skersmuo")
     finally:
         db.set_clock(real_clock)
     con.commit()

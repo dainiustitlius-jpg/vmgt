@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import config as cfgmod
 from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
-                        importer, meetings, ncr, projects, routing, seed, tasks)
+                        importer, meetings, ncfiles, ncr, projects, routing, seed, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -30,7 +30,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     con = db.connect(cfg.db_path)
     db.migrate(con)
     if cfg.seed_sample and seed.is_empty(con):
-        seed.seed(con, cfg.files_dir)
+        seed.seed(con, cfg.files_dir, nc_dir=cfg.nc_path)
     con.close()
 
     @app.exception_handler(RuleError)
@@ -110,6 +110,8 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
             "ncr_categories": [{"key": k, "label": v} for k, v in ncr.CATEGORIES],
             "action_statuses": [{"key": k, "label": v} for k, v in actions.STATUSES],
             "priorities": [{"key": k, "label": v} for k, v in actions.PRIORITIES],
+            # kaip technologo failų katalogą mato cecho kompiuteriai
+            "nc_share": cfg.nc_share or str(cfg.nc_path.resolve()),
         }
 
     # ---------- projektai ----------
@@ -284,6 +286,53 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     def route_unrelease(aid: int, body: dict, user=Depends(need("release")), con=Depends(get_con)):
         routing.unrelease(con, user["id"], aid, body.get("reason", ""))
         return {"ok": True}
+
+    # ---------- technologo failai ir darbo aplinka ----------
+
+    @app.post("/api/tasks/{tid}/files")
+    async def file_upload(tid: int, file: UploadFile = File(...), note: str = Form(""),
+                          user=Depends(need("tasks")), con=Depends(get_con)):
+        content = await file.read()
+        return ncfiles.save(con, cfg.nc_path, user, tid, file.filename, content, note)
+
+    @app.get("/api/tasks/{tid}/files")
+    def file_list(tid: int, history: int = 0, user=Depends(view_or_execute), con=Depends(get_con)):
+        return ncfiles.list_for(con, [tid], history=bool(history))[tid]
+
+    @app.get("/api/files/{fid}")
+    def file_get(fid: int, user=Depends(view_or_execute), con=Depends(get_con)):
+        f = ncfiles.get(con, fid)
+        path = ncfiles.full_path(cfg.nc_path, f)
+        if not path.exists():
+            raise HTTPException(404, "Failas nerastas diske")
+        # visada atsisiųsti, ne atidaryti naršyklėje – tai staklių failai
+        return FileResponse(path, media_type="application/octet-stream", filename=path.name)
+
+    @app.delete("/api/files/{fid}")
+    def file_remove(fid: int, user=Depends(need("tasks")), con=Depends(get_con)):
+        ncfiles.remove(con, user, fid)
+        return {"ok": True}
+
+    @app.post("/api/tasks/{tid}/ack_files")
+    def file_ack(tid: int, user=Depends(need("ack_rev")), con=Depends(get_con)):
+        return {"acked": ncfiles.ack(con, user, tid)}
+
+    @app.get("/api/tech/worklist")
+    def tech_worklist(mine: int = 0, user=Depends(need("tasks")), con=Depends(get_con)):
+        return routing.worklist(con, user["id"] if mine else None)
+
+    @app.get("/api/tech/sources")
+    def tech_sources(user=Depends(need("tasks")), con=Depends(get_con)):
+        # mazgai su maršrutu – iš jų galima kopijuoti
+        return db.rows(con.execute(
+            "SELECT a.id, a.code, a.name, a.qty, p.code AS project_code, COUNT(t.id) AS ops "
+            "FROM assemblies a JOIN projects p ON p.id=a.project_id JOIN tasks t ON t.assembly_id=a.id "
+            "GROUP BY a.id ORDER BY p.code DESC, a.sort"))
+
+    @app.post("/api/route/{aid}/copy")
+    def route_copy(aid: int, body: dict, user=Depends(need("tasks")), con=Depends(get_con)):
+        return routing.copy_route(con, cfg.nc_path, user, int(body.get("from_assembly") or 0), aid,
+                                  bool(body.get("files", True)))
 
     @app.get("/api/qr")
     def qr(data: str, user=Depends(get_user)):

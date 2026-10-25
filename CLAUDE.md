@@ -23,7 +23,7 @@ Architektūros juodraštis: https://claude.ai/artifact/9EELgdH4xQFqTFnbJmm8nt
 ## Paleidimas
 
 `python -m vmgt` (portas 8080). Nustatymai – `vmgt_config.json` darbo
-kataloge (`host`, `port`, `data_dir`, `seed_sample`, `session_hours`); failo
+kataloge (`host`, `port`, `data_dir`, `seed_sample`, `session_hours`, `nc_dir`, `nc_share`); failo
 nėra – numatytosios. Duomenys – `data/` (`vmgt.db`, įkelti brėžiniai
 `data/files/`), į git neįtraukiami.
 
@@ -44,7 +44,8 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `services/auth.py` | Vartotojai, rolės (`ROLES`), teisės (`PERMS`), PBKDF2, sesijos (bazėje – žetono SHA-256), PIN terminalui, centrų apribojimas `can_centre` |
 | `services/projects.py` | Krepšelis, mazgai (`requires` – nuo kurių mazgų priklauso), etapai (`PHASE_KINDS`), gamybos barai, darbo centrai |
 | `services/tasks.py` | Užduotys, eilės, terminalo veiksmai, **visos pradėjimo taisyklės – `block_reason`** |
-| `services/routing.py` | Technologinis srautas: detalių atšakos → mazgas, kur keliauti toliau, išleidimas į gamybą, perdavimai, atsekamumas |
+| `services/routing.py` | Technologinis srautas: detalių atšakos → mazgas, kur keliauti toliau, išleidimas į gamybą, perdavimai, atsekamumas, technologo darbų sąrašas, maršruto kopijavimas |
+| `services/ncfiles.py` | Technologo failai prie operacijų (DXF, NC, robotų, PLC): katalogai, versijos, meistro patvirtinimas |
 | `services/ncr.py` | Neatitiktys: atvira → priskirta → uzdaryta |
 | `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
 | `services/importer.py` | Maršrutų CSV importas (vėliau – D365 / PDM) |
@@ -116,6 +117,29 @@ mazgai su operacijomis laikomi išleistais. Pavyzdžiuose P-24117 200 – dvi
 detalės (1023-201, 1023-210) susilieja SV-02; P-24121 200 – technologo
 juodraštis išleidimui išbandyti. `requirements.txt` + `segno` (`paleisti.bat`
 įdiegia pats). `test_srautas.py`.
+
+## Technologo darbo aplinka ir failai (nuo 2026-10-25)
+
+Vartotojo prašymas: lazeriui, plazmai, CNC reikia DXF ir kitų failų, kuriuos
+technologas parengia ir priskiria operacijai; failai – kataloguose; technologo
+aplinka visam technologiniam keliui. Sprendimai: **VMGT tvarko katalogus pati**,
+**darbų sąrašas + maršruto redaktorius**, pakeistas po išleidimo failas –
+**kaip brėžinio revizija (meistras patvirtina)**.
+
+| | |
+|---|---|
+| katalogai | `ncfiles.save`: `<nc_dir>/<projektas>/<mazgas>/<centras>/<failas>_v<N>.<plėtinys>`. `vmgt_config.json`: `nc_dir` (tuščia – `data/nc`; gali būti tinklo diskas), `nc_share` – kaip katalogą mato cecho kompiuteriai (rodoma terminale ir redaktoriuje). Pavadinimai valomi (`_safe`) – kelias iš katalogo neišeina |
+| versijos | tas pats originalus pavadinimas → nauja versija, senoji lieka diske ir istorijoje (`task_files.current=0`); toks pat turinys (sha256) – klaida. Pašalinti – tik neišleistame maršrute, diske lieka |
+| tipai | leidžiamų plėtinių sąrašas `ncfiles.KINDS`: CAD (dxf, dwg, step…), NC (nc, mpf, h, tap…), robotų (mod, src, ls, jbi…), PLC (zap*, ap*, l5x, scl…), dokumentai. Nežinomas (.exe) – atmetamas; naujas valdiklio formatas – įrašyti ten. Iki 200 MB |
+| staklės | `work_centres.needs_files` (migracija 9, administravime „Reikia failo“): be failo maršruto išleisti negalima (`routing.check` – klaida). Pavyzdžiuose: LAZ-01, PLZ-01, LNK-01, CNC-01, MECH-01, PRG-01 |
+| po išleidimo | įkeltas failas – `needs_ack=1`: nepradėta operacija užrakinama (`block_reason`: „Atnaujintas technologo failas … Reikia meistro patvirtinimo“), terminale mygtukas „Patvirtinti failą“ (teisė `ack_rev`); vykdomai – įspėjimas |
+| technologo sąrašas | `#/technologija` (teisė `tasks`, `routing.worklist`): vykdomų ir krepšelio projektų mazgai – nėra maršruto / juodraštis / išleista, be failo, be normos, laukia meistro, technologijos etapo atsakingas ir terminas; „Mano“ – pagal technologijos etapo atsakingąjį |
+| redaktorius | `#/technologija/<mazgo id>`: lentelės pagal detales ir mazgą, keitimas vietoje, failai (įkelti, nutempti ant eilutės, versijų istorija), operacijos pridėjimas, **maršruto kopijavimas iš kito mazgo** (`routing.copy_route`: kiekiai perskaičiuojami pagal mazgų kiekį, failai – kaip v1), srauto peržiūra, išleidimas / grąžinimas |
+| terminale | failų žymos su atsisiuntimu ir katalogo kelias; maršruto lapuose – stulpelis „Failai“ |
+
+`test_failai.py`. Pavyzdžiuose P-24121 200 lenkimui failo sąmoningai nėra
+(išleidimas rodo klaidą), P-24121 100 plazmos programa pakeista po išleidimo
+(PLZ-01 laukia meistro).
 
 ## Resursų apkrova (nuo 2026-10-25)
 

@@ -114,7 +114,7 @@ def test_migracija_islaiko_uzduotis(tmp_path):
     c.execute("INSERT INTO actions (project_id, title, created, updated) VALUES (1, 'Sena', 'x', 'x')")
     c.execute("INSERT INTO action_log (action_id, at, kind) VALUES (1, 'x', 'comment')")
     c.commit()
-    assert db.migrate(c) == 8
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert [tuple(r) for r in c.execute("SELECT title, plan_date FROM actions")] == [("Sena", None)]
     assert c.execute("PRAGMA foreign_key_check").fetchall() == []
     with pytest.raises(sqlite3.IntegrityError):                 # nuoroda į actions veikia ir po perkūrimo

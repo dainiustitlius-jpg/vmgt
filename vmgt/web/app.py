@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import config as cfgmod
 from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
-                        importer, meetings, ncr, projects, seed, tasks)
+                        importer, meetings, ncr, projects, routing, seed, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -263,6 +263,38 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.post("/api/terminal/{tid}/stop")
     def t_stop(tid: int, body: dict, user=Depends(need("execute")), con=Depends(get_con)):
         return tasks.stop(con, user, tid, body.get("good", 0), body.get("scrap", 0), body.get("finish"))
+
+    # ---------- technologinis srautas ir atsekamumas ----------
+
+    def view_or_execute(user=Depends(get_user)):
+        # maršruto lapo QR nuskenuoja ir operatorius, kuris projektų nemato
+        if not auth.perms_of(user) & {"view", "execute"}:
+            raise HTTPException(403, "Neturite teisės šiam veiksmui")
+        return user
+
+    @app.get("/api/route/{aid}")
+    def route_get(aid: int, user=Depends(view_or_execute), con=Depends(get_con)):
+        return routing.trace(con, aid)
+
+    @app.post("/api/route/{aid}/release")
+    def route_release(aid: int, user=Depends(need("release")), con=Depends(get_con)):
+        return routing.release(con, user["id"], aid)
+
+    @app.post("/api/route/{aid}/unrelease")
+    def route_unrelease(aid: int, body: dict, user=Depends(need("release")), con=Depends(get_con)):
+        routing.unrelease(con, user["id"], aid, body.get("reason", ""))
+        return {"ok": True}
+
+    @app.get("/api/qr")
+    def qr(data: str, user=Depends(get_user)):
+        # QR piešiamas serveryje: cecho kompiuteriai gali būti be interneto
+        import io
+
+        import segno
+
+        buf = io.BytesIO()
+        segno.make(data, error="m").save(buf, kind="svg", scale=4, border=2, xmldecl=False)
+        return Response(buf.getvalue(), media_type="image/svg+xml")
 
     # ---------- cechas ir analitika ----------
 

@@ -44,6 +44,7 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `services/auth.py` | Vartotojai, rolės (`ROLES`), teisės (`PERMS`), PBKDF2, sesijos (bazėje – žetono SHA-256), PIN terminalui, centrų apribojimas `can_centre` |
 | `services/projects.py` | Krepšelis, mazgai (`requires` – nuo kurių mazgų priklauso), etapai (`PHASE_KINDS`), gamybos barai, darbo centrai |
 | `services/tasks.py` | Užduotys, eilės, terminalo veiksmai, **visos pradėjimo taisyklės – `block_reason`** |
+| `services/routing.py` | Technologinis srautas: detalių atšakos → mazgas, kur keliauti toliau, išleidimas į gamybą, perdavimai, atsekamumas |
 | `services/ncr.py` | Neatitiktys: atvira → priskirta → uzdaryta |
 | `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
 | `services/importer.py` | Maršrutų CSV importas (vėliau – D365 / PDM) |
@@ -68,12 +69,15 @@ Vykdymas: `intervals` (darbas) ir `pauses` (su priežastimi); kiekiai –
 ## Terminalo taisyklės (`tasks.block_reason`)
 
 Pradėti galima, jei:
+0. mazgo maršrutas išleistas į gamybą (`assemblies.released_at`);
 1. užduotis patvirtinta planuotojo (`approved`);
 2. centre niekas nevyksta ir nėra pristabdytos užduoties;
 3. griežtos eilės centre (`strict_order`, numatyta) – tai pirma patvirtinta;
-4. ankstesnė maršruto operacija baigta arba perdavė bent dalį (`qty_good > 0`)
-   – dalinis perdavimas vienetinėje gamyboje kasdienis;
-5. pirmoji mazgo operacija – visi `requires` mazgai baigti;
+4. ankstesnė **srauto** operacija baigta arba perdavė bent dalį (`qty_good > 0`)
+   – dalinis perdavimas vienetinėje gamyboje kasdienis; pirmajai mazgo
+   operacijai – kiekvienos detalės atšakos paskutinė („Laukiama detalių: …“);
+5. įėjimo operacija (pirmoji mazgo, o jei jų nėra – atšakų pirmosios) – visi
+   `requires` mazgai baigti;
 6. brėžinio revizija nepasikeitė; pasikeitus – meistras patvirtina
    (`ack_revision`, teisė `ack_rev`).
 
@@ -88,6 +92,30 @@ kiti → gamyba) ir projektą perkelia iš krepšelio į vykdomus.
 sumą, o atvirą naršyklė prideda pati kas sekundę. Iki 2026-10-24 terminalas
 gaudavo sumą su atviru intervalu ir jį pridėdavo dar kartą (8:02 vietoj
 6:00). `test_terminalo_laikas_be_atviro_intervalo`.
+
+## Technologinis srautas ir detalių atsekamumas (nuo 2026-10-25)
+
+Vartotojo prašymas: ceche kiekviename centre patvirtinus operaciją turi matytis,
+kur detalė keliauja toliau; visą srautą technologas nurodo paleisdamas į
+gamybą. Sprendimai (2026-10-25): **detalės susilieja į mazgą**, **maršruto
+lapas su QR**, perdavimas **automatiškai baigus operaciją** (vienas veiksmas).
+
+| | |
+|---|---|
+| srautas | operacijos `part_no` – detalės atšaka (pvz. lazeris → lenkimas), tuščias – mazgo operacija, kurioje atšakos susilieja (suvirinimas → dažymas). Atšakos eina lygiagrečiai. Baigtas mazgas → mazgai, kurie jo laukia (`requires`), kitaip – „į sandėlį / išsiuntimui“. Tas pats CSV stulpelis `detale` – naujo formato nereikia |
+| išleidimas | technologas (teisė `release`) lange „Srautas ir atsekamumas“ (`#/r/<mazgo id>`) spaudžia „Išleisti į gamybą“: `routing.check` – klaidos draudžia (nėra operacijų, mazgo operacija prieš detalių, nėra laukiamo mazgo), įspėjimai – ne (be normos, be brėžinio, atšakos nesusilieja). Iki tol planuotojas užduočių netvirtina (`approve_queue` jų nepaima), terminalas nepradeda |
+| užraktas | išleistame maršrute negalima pridėti, šalinti, keisti centro, sekos, detalės, kiekio (pavadinimą, normą, brėžinį – galima); CSV importas į išleistą mazgą – klaida. „Keisti maršrutą“ (`unrelease`) – tik su priežastimi; pradėti darbai tęsiami, nepradėti užrakinami iki naujo išleidimo. Abu veiksmai – `events` |
+| perdavimas | Stop su gerais vienetais → `transfers` (iš, į, kiek, kas, kada) ir terminale didelis langas „PERDUOKITE N VNT. → SV-02 …, čia susilieja 2 detalės“ |
+| terminale | prie kiekvienos užduoties eilutė „Detalė … · iš ← LNK-01 ✓ · atkeliavo 2 vnt. · toliau → SV-02“. Lauke „Skenuokite maršruto lapą“ USB skaitytuvas įveda QR nuorodą + Enter: randama ir paryškinama šio centro užduotis, o jei detalė čia neateina / dar ne eilėje / jau apdirbta – parodoma, kur ji dabar |
+| atsekamumas | `routing.trace`: atšakos ir mazgas su būsenomis, „📍 kur dabar“ (apdirbama, laukia N vnt., liko N vnt., detalės atkeliavo), kliūtis, perdavimų istorija; atsinaujina kas 20 s. Operatorius (be teisės `view`) jį mato – QR nuskenuoja ir telefonu |
+| maršruto lapai | `#/r/<id>/lapai` – po lapą kiekvienai detalei ir mazgui: projektas, mazgas, brėžinys, operacijos su vieta parašui, „Baigus →“, QR (`/api/qr`, piešia serveris – `segno`, nes cecho kompiuteriai gali būti be interneto). Neišleistas – „JUODRAŠTIS“ |
+| atvykę vienetai | `routing.arrived` skaičiuojamas tik toje pačioje atšakoje – 4 plokštės ≠ 1 rėmas, sumuoti negalima |
+
+Migracija 7: `assemblies.released_at/released_by`, `transfers`; esamos bazės
+mazgai su operacijomis laikomi išleistais. Pavyzdžiuose P-24117 200 – dvi
+detalės (1023-201, 1023-210) susilieja SV-02; P-24121 200 – technologo
+juodraštis išleidimui išbandyti. `requirements.txt` + `segno` (`paleisti.bat`
+įdiegia pats). `test_srautas.py`.
 
 ## Resursų apkrova (nuo 2026-10-25)
 

@@ -3,7 +3,7 @@
 import pytest
 from conftest import login
 
-from vmgt.services import RuleError, auth, components, projects, tasks
+from vmgt.services import RuleError, auth, components, projects, routing, tasks
 
 
 @pytest.fixture
@@ -75,6 +75,7 @@ def test_terminalas_ispeja_apie_negautus(con, proj):
     c = projects.save_centre(con, proj["admin"], {"code": "EL", "name": "Elektra", "kind": "elektra"})
     t = tasks.create_task(con, proj["admin"], {"project_id": proj["pid"], "assembly_id": proj["a"],
                                                "centre_id": c, "name": "Montavimas"})
+    routing.release(con, proj["admin"], proj["a"])
     tasks.approve_queue(con, proj["admin"], c)
     components.save(con, proj["admin"], {"project_id": proj["pid"], "assembly_id": proj["a"], "name": "PLC"})
     centre = dict(con.execute("SELECT * FROM work_centres WHERE id=?", (c,)).fetchone())

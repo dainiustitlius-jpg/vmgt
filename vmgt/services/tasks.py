@@ -10,7 +10,7 @@ atsakyti skirtingai.
 from __future__ import annotations
 
 from .. import db
-from . import NotFound, RuleError, components
+from . import NotFound, RuleError, components, routing
 from .projects import PHASE_LABEL
 
 PAUSE_REASONS = [
@@ -51,6 +51,7 @@ def create_task(con, by, data: dict) -> int:
     for k in ("project_id", "assembly_id", "centre_id", "name"):
         if not data.get(k):
             raise RuleError(f"Trūksta lauko: {k}")
+    routing.ensure_editable(con, data["assembly_id"])
     seq = data.get("seq")
     if seq is None:
         seq = con.execute("SELECT COALESCE(MAX(seq),0)+10 FROM tasks WHERE assembly_id=?",
@@ -71,6 +72,10 @@ def update_task(con, by, task_id, data: dict) -> None:
     t = _task(con, task_id)
     vals = {k: data[k] for k in ("name", "part_no", "qty_plan", "norm_min", "drawing_no", "drawing_rev", "seq")
             if k in data}
+    # išleistame maršrute keisti galima tik tai, kas srauto nekeičia
+    if any(k in ("part_no", "qty_plan", "seq") and vals[k] != t[k] for k in vals) or \
+            data.get("centre_id", t["centre_id"]) != t["centre_id"]:
+        routing.ensure_editable(con, t["assembly_id"])
     if "centre_id" in data and data["centre_id"] != t["centre_id"]:
         if t["status"] != "laukia" or _work_seconds(con, task_id) > 0:
             raise RuleError("Pradėtos užduoties perkelti į kitą centrą negalima")
@@ -84,7 +89,8 @@ def update_task(con, by, task_id, data: dict) -> None:
 
 
 def delete_task(con, by, task_id) -> None:
-    _task(con, task_id)
+    t = _task(con, task_id)
+    routing.ensure_editable(con, t["assembly_id"])
     if con.execute("SELECT 1 FROM intervals WHERE task_id=?", (task_id,)).fetchone():
         raise RuleError("Užduotis jau vykdyta – jos ištrinti negalima")
     con.execute("DELETE FROM tasks WHERE id=?", (task_id,))
@@ -122,8 +128,10 @@ def move(con, by, task_id, where: str) -> None:
 
 
 def approve_queue(con, by, centre_id) -> int:
-    """Planuotojas patvirtina centro eilę: terminalas mato tik patvirtintas."""
-    n = con.execute("UPDATE tasks SET approved=1 WHERE centre_id=? AND status!='baigta' AND approved=0",
+    """Planuotojas patvirtina centro eilę: terminalas mato tik patvirtintas.
+    Neišleistų maršrutų užduotys netvirtinamos – technologas dar nebaigė."""
+    n = con.execute("UPDATE tasks SET approved=1 WHERE centre_id=? AND status!='baigta' AND approved=0 "
+                    "AND assembly_id IN (SELECT id FROM assemblies WHERE released_at IS NOT NULL)",
                     (centre_id,)).rowcount
     db.log_event(con, by, "centre", centre_id, "approve_queue", {"count": n})
     return n
@@ -153,6 +161,8 @@ def block_reason(con, t: dict) -> str | None:
         return "Užduotis jau atlikta"
     if t["status"] in ("vykdoma", "pristabdyta"):
         return None
+    if not routing.is_released(con, t["assembly_id"]):
+        return "Maršrutas dar neišleistas į gamybą – laukiama technologo"
     if not t["approved"]:
         return "Eilė dar nepatvirtinta planuotojo"
     busy = _running_in_centre(con, t["centre_id"], exclude=t["id"])
@@ -167,16 +177,17 @@ def block_reason(con, t: dict) -> str | None:
             (t["centre_id"],)))
         if first and first["id"] != t["id"]:
             return f"Pirma eilėje: {first['assembly_code']} · {first['name']}"
-    # Ankstesnė maršruto operacija turi būti atlikta arba perdavusi bent dalį
-    # kiekio – vienetinėje gamyboje dalinis perdavimas yra kasdienybė.
-    up = db.row(con.execute(
-        "SELECT t.name, c.code AS centre_code FROM tasks t JOIN work_centres c ON c.id=t.centre_id "
-        "WHERE t.assembly_id=? AND t.seq<? AND t.status!='baigta' AND t.qty_good=0 "
-        "ORDER BY t.seq DESC LIMIT 1", (t["assembly_id"], t["seq"])))
-    if up:
-        return f"Laukiama ankstesnės operacijos: {up['centre_code']} · {up['name']}"
-    # pirmoji mazgo operacija laukia mazgų, nuo kurių jis priklauso
-    if not con.execute("SELECT 1 FROM tasks WHERE assembly_id=? AND seq<?", (t["assembly_id"], t["seq"])).fetchone():
+    # Ankstesnė srauto operacija turi būti atlikta arba perdavusi bent dalį
+    # kiekio – vienetinėje gamyboje dalinis perdavimas yra kasdienybė. Mazgo
+    # pirmajai operacijai – kiekviena detalių atšaka (čia jos susilieja).
+    st = routing.structure(con, t["assembly_id"])
+    waiting = [u for u in routing.upstream(con, t, st) if u["status"] != "baigta" and u["qty_good"] == 0]
+    if waiting and not t["part_no"] and len(routing.upstream(con, t, st)) > 1:
+        return "Laukiama detalių: " + ", ".join(f"{u['part_no']} ({u['centre_code']})" for u in waiting)
+    if waiting:
+        return f"Laukiama ankstesnės operacijos: {waiting[0]['centre_code']} · {waiting[0]['name']}"
+    # į mazgą ateina mazgai, kurių jis laukia
+    if routing.is_entry(con, t, st):
         req = con.execute("SELECT requires, project_id FROM assemblies WHERE id=?", (t["assembly_id"],)).fetchone()
         codes = [c for c in (req["requires"] if req else "").split(",") if c]
         if codes:
@@ -292,7 +303,10 @@ def stop(con, user, task_id, good: int, scrap: int = 0, finish: bool | None = No
                 (status, total_good, total_scrap, task_id))
     db.log_event(con, user["id"], "task", task_id, "stop",
                  {"good": good, "scrap": scrap, "status": status})
-    return {"status": status, "suggest_ncr": scrap > 0, "qty_good": total_good, "qty_scrap": total_scrap}
+    # geri vienetai iškart perduodami kitai srauto operacijai
+    nxt = routing.record_transfer(con, user["id"], t, good)
+    return {"status": status, "suggest_ncr": scrap > 0, "qty_good": total_good, "qty_scrap": total_scrap,
+            "moved": good, "next": nxt}
 
 
 def ack_revision(con, user, task_id) -> None:
@@ -336,6 +350,7 @@ def terminal_view(con, centre: dict) -> dict:
         # įspėjimas, ne draudimas: dalį darbo dažnai galima pradėti ir be
         # visų pirktinių komponentų, sprendžia meistras
         t["components_missing"] = components.missing_for_assembly(con, t["assembly_id"])
+        _flow(con, t)
         if t["status"] in ("vykdoma", "pristabdyta"):
             iv = _open_interval(con, t["id"])
             pz = _open_pause(con, t["id"])
@@ -361,6 +376,16 @@ def terminal_view(con, centre: dict) -> dict:
             "pause_reasons": [{"key": k, "label": v} for k, v in PAUSE_REASONS]}
 
 
+def _flow(con, t) -> None:
+    """Iš kur detalės ateina ir kur keliaus – operatorius mato visą srautą."""
+    st = routing.structure(con, t["assembly_id"])
+    ups = routing.upstream(con, t, st)
+    t["from"] = [{"centre_code": u["centre_code"], "name": u["name"], "part_no": u["part_no"],
+                  "qty_good": u["qty_good"], "done": u["status"] == "baigta"} for u in ups]
+    t["arrived"] = routing.arrived(t, ups)
+    t["next"] = routing.next_steps(con, t, st)
+
+
 def plan_view(con, centre: dict) -> list[dict]:
     """Planuotojo vaizdas: visa centro eilė su būsena ir blokavimo priežastimi."""
     out = []
@@ -368,6 +393,7 @@ def plan_view(con, centre: dict) -> list[dict]:
         t["strict_order"] = centre["strict_order"]
         t["lock"] = None if t["status"] != "laukia" else block_reason(con, {**t, "approved": 1})
         t["components_missing"] = components.missing_for_assembly(con, t["assembly_id"])
+        _flow(con, t)
         out.append(t)
     return out
 

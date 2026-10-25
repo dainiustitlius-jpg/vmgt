@@ -2,7 +2,7 @@
 
 import pytest
 
-from vmgt.services import RuleError, auth, drawings, projects, tasks
+from vmgt.services import RuleError, auth, drawings, projects, routing, tasks
 
 
 @pytest.fixture
@@ -25,6 +25,8 @@ def plant(con, clock, cfg):
         "qty_plan": qty, "drawing_no": "D-1", "drawing_rev": "A"})
     ids = {"cut": mk(a1, laz, 10, "Pjovimas"), "cut2": mk(a1, laz, 15, "Pjovimas 2"),
            "weld": mk(a1, sv, 20, "Suvirinimas"), "asm": mk(a2, sur, 10, "Surinkimas", 1)}
+    for a in (a1, a2):
+        routing.release(con, admin, a)
     for c in (laz, sv, sur):
         tasks.approve_queue(con, admin, c)
     u = lambda i: dict(con.execute("SELECT * FROM users WHERE id=?", (i,)).fetchone())
@@ -37,8 +39,11 @@ def T(con, i):
 
 
 def test_neparvirtinta_eile_neleidzia_pradeti(con, plant):
+    a = T(con, plant["ids"]["cut"])["assembly_id"]
+    routing.unrelease(con, plant["admin"], a, "papildoma operacija")
     i = tasks.create_task(con, plant["admin"], {"project_id": plant["pid"], "assembly_id": T(con, plant["ids"]["cut"])["assembly_id"],
                                                 "centre_id": plant["centres"]["LAZ"], "seq": 5, "name": "Nauja"})
+    routing.release(con, plant["admin"], a)
     with pytest.raises(RuleError, match="nepatvirtinta"):
         tasks.start(con, plant["op"], i)
 
@@ -101,7 +106,9 @@ def test_brokas_siulo_neatitikti_ir_baigia(con, plant):
     op, i = plant["op"], plant["ids"]["cut"]
     tasks.start(con, op, i)
     r = tasks.stop(con, op, i, good=1, scrap=1)
-    assert r == {"status": "baigta", "suggest_ncr": True, "qty_good": 1, "qty_scrap": 1}
+    assert {k: r[k] for k in ("status", "suggest_ncr", "qty_good", "qty_scrap", "moved")} == \
+        {"status": "baigta", "suggest_ncr": True, "qty_good": 1, "qty_scrap": 1, "moved": 1}
+    assert r["next"][0]["centre_code"] == "LAZ"                 # toliau – Pjovimas 2
 
 
 def test_revizija_uzrakina_kol_meistras_patvirtina(con, plant, cfg):

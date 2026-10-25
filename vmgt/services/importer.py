@@ -1,7 +1,10 @@
 """Maršrutų importas iš CSV – laikinas kelias, kol nėra D365 / PDM integracijų.
 
 Viena eilutė – viena mazgo operacija. Projektas ir mazgas sukuriami, jei jų
-dar nėra. Skirtukas – kabliataškis (Excel lietuviškuose nustatymuose) arba
+dar nėra. Stulpelis „detale“ nusako srautą: operacijos su tuo pačiu detalės
+kodu – tos detalės atšaka, be jo – mazgo operacijos, į kurias atšakos
+susilieja (`routing`). Importuotas maršrutas lieka juodraštis, kol technologas
+jo neišleidžia į gamybą. Skirtukas – kabliataškis (Excel lietuviškuose nustatymuose) arba
 kablelis; atpažįstama savaime.
 
 Importas – viskas arba nieko: radus bent vieną klaidą neįrašoma niekas, o
@@ -47,6 +50,10 @@ def run(con, user, text: str, dry_run: bool = False) -> dict:
         for c in REQUIRED:
             if not r.get(c):
                 errors.append(f"{i} eil.: tuščias „{c}“")
+        if r.get("projektas") and r.get("mazgas") and con.execute(
+                "SELECT 1 FROM assemblies a JOIN projects p ON p.id=a.project_id "
+                "WHERE p.code=? AND a.code=? AND a.released_at IS NOT NULL", (r["projektas"], r["mazgas"])).fetchone():
+            errors.append(f"{i} eil.: mazgo {r['mazgas']} maršrutas jau išleistas į gamybą – pirma grąžinkite jį keisti")
         if r.get("centras") and r["centras"] not in centres:
             errors.append(f"{i} eil.: nežinomas darbo centras „{r['centras']}“")
         for c in ("seka", "kiekis"):

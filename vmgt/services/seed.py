@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import actions, auth, capacity, components, drawings, meetings, projects, tasks
+from . import actions, auth, capacity, components, drawings, meetings, projects, routing, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -123,10 +123,11 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
                                                                 "plan_start": d(s), "plan_end": d(e), "hours": hours,
                                                                 "department_id": dept[dep] if dep else None})
 
-        def task(pid, asm, centre, seq, name, qty=1, norm=0, drw="", rev=""):
+        def task(pid, asm, centre, seq, name, qty=1, norm=0, drw="", rev="", part=""):
+            # part – detalės atšaka; be jos – mazgo operacija (detalės čia susilieja)
             return tasks.create_task(con, uid["admin"], {
                 "project_id": pid, "assembly_id": asm, "centre_id": cid[centre], "seq": seq, "name": name,
-                "qty_plan": qty, "norm_min": norm, "drawing_no": drw, "drawing_rev": rev})
+                "qty_plan": qty, "norm_min": norm, "drawing_no": drw, "drawing_rev": rev, "part_no": part})
 
         # --- P-24117: vykdomas, dalis darbų atlikta ---
         p1, a1 = project("P-24117", "Konvejerio linija K-12", "UAB Pavyzdinė gamyba", d(30), 1, "vadovas",
@@ -145,14 +146,14 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         phase(p1, None, "programavimas", "vadovas", 6, 20, 160)
         phase(p1, None, "testavimas", "kokybe", 20, 26, 60)
 
-        r10 = task(p1, a1["100"], "LAZ-01", 10, "Lakštų detalių pjovimas", 1, 45, "1023-100", "A")
-        r20 = task(p1, a1["100"], "LNK-01", 20, "Lenkimas", 1, 60, "1023-100", "A")
+        r10 = task(p1, a1["100"], "LAZ-01", 10, "Lakštų detalių pjovimas", 1, 45, "1023-100", "A", "1023-101")
+        r20 = task(p1, a1["100"], "LNK-01", 20, "Lenkimas", 1, 60, "1023-100", "A", "1023-101")
         r30 = task(p1, a1["100"], "SV-01", 30, "Rėmo suvirinimas", 1, 240, "1023-100", "A")
         task(p1, a1["100"], "SML-01", 35, "Smėliavimas Sa 2,5", 1, 40, "1023-100", "A")
         task(p1, a1["100"], "DAZ-01", 40, "Dažymas RAL 7035", 1, 90, "1023-100", "A")
-        k10 = task(p1, a1["200"], "LAZ-01", 10, "Šoninių plokščių pjovimas", 2, 20, "1023-200", "C")
-        k20 = task(p1, a1["200"], "LNK-01", 20, "Šonų lenkimas", 2, 25, "1023-200", "C")
-        task(p1, a1["200"], "CNC-01", 30, "Velenų tekinimas", 4, 35, "1023-200", "C")
+        k10 = task(p1, a1["200"], "LAZ-01", 10, "Šoninių plokščių pjovimas", 2, 20, "1023-200", "C", "1023-201")
+        k20 = task(p1, a1["200"], "LNK-01", 20, "Šonų lenkimas", 2, 25, "1023-200", "C", "1023-201")
+        task(p1, a1["200"], "CNC-01", 30, "Velenų tekinimas", 4, 35, "1023-200", "C", "1023-210")
         task(p1, a1["200"], "SV-02", 40, "Konvejerio rėmo suvirinimas", 2, 150, "1023-200", "C")
         task(p1, a1["200"], "DAZ-02", 50, "Miltelinis dažymas RAL 5010", 2, 60, "1023-200", "C")
         task(p1, a1["300"], "EL-01", 10, "Spintos montavimas", 1, 480)
@@ -175,6 +176,12 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         task(p2, a2["100"], "PLZ-01", 10, "Tvoros stulpų pjovimas", 6, 15, "2210-100", "B")
         task(p2, a2["100"], "SV-02", 20, "Tvoros sekcijų suvirinimas", 6, 70, "2210-100", "B")
         task(p2, a2["100"], "DAZ-01", 30, "Dažymas RAL 1023", 6, 30, "2210-100", "B")
+        # pozicionieriaus maršrutas – technologo juodraštis, dar neišleistas
+        task(p2, a2["200"], "TEK-01", 10, "Ašies tekinimas", 1, 120, "2210-200", "A", "2210-201")
+        task(p2, a2["200"], "LAZ-01", 10, "Plokščių pjovimas", 4, 12, "2210-200", "A", "2210-202")
+        task(p2, a2["200"], "LNK-01", 20, "Plokščių lenkimas", 4, 15, "2210-200", "A", "2210-202")
+        task(p2, a2["200"], "SV-03", 30, "Pozicionieriaus suvirinimas", 1, 360, "2210-200", "A")
+        task(p2, a2["200"], "DAZ-02", 40, "Miltelinis dažymas RAL 9005", 1, 60, "2210-200", "A")
 
         # --- P-24130: tik krepšelyje ---
         p3, a3 = project("P-24130", "Talpų stovai TS-8", "UAB Pavyzdys", d(80), 3, "vadovas",
@@ -184,6 +191,8 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         phase(p3, a3["100"], "gamyba", "meistras", 20, 35, 700, "SVB")
         phase(p3, a3["100"], "gamyba", "meistras", 33, 40, 160, "DZB")
 
+        for a in (a1["100"], a1["200"], a1["300"], a1["900"], a2["100"]):
+            routing.release(con, uid["technologas"], a)
         for code, c in cid.items():
             if code != "DAZ-01":
                 tasks.approve_queue(con, uid["planuotojas"], c)

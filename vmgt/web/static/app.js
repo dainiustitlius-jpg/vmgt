@@ -89,6 +89,8 @@ const ROUTES = [
   [/^#\/cechas$/, pageFloor],
   [/^#\/planas(?:\/([\w-]+))?$/, pagePlan],
   [/^#\/t(?:\/([\w-]+))?$/, pageTerminal],
+  [/^#\/r\/(\d+)(?:\/d\/([^/]+))?$/, pageRoute],
+  [/^#\/r\/(\d+)\/lapai$/, pageRouteCards],
   [/^#\/ncr$/, pageNcr],
   [/^#\/analitika$/, pageAnalytics],
   [/^#\/komponentai(?:\/(\d+))?$/, pageComponents],
@@ -266,19 +268,25 @@ async function pageProject(pid, tab) {
         `<span class="num">${esc(m.held_at.replace("T", " ").slice(0, 16))}</span>`, `<a href="#/m/${m.id}">${esc(m.title)}</a>`, esc(m.chair_name || "—"),
         `${m.actions_closed} iš ${m.actions_total} uždaryta`, pill(m.status === "patvirtintas" ? "baigta" : "laukia", m.status_label)])}`,
     gamyba: () => `<div class="card"><h2>Mazgai ir maršrutai</h2>
+    <p class="muted">Detalės kodas nusako srautą: tos pačios detalės operacijos – jos atšaka, be kodo – mazgo operacijos, kuriose detalės susilieja. Ceche užduotys matomos tik technologui išleidus maršrutą į gamybą.</p>
     ${p.assemblies.map(a => {
       const ts = p.tasks.filter(t => t.assembly_id === a.id);
-      return `<div><h3><span class="mono">${esc(a.code)}</span> ${esc(a.name)} <span class="muted">× ${a.qty}${a.requires ? ` · laukia mazgų ${esc(a.requires)}` : ""}</span></h3>
-      <div class="tbl"><table><thead><tr><th>Seka</th><th>Centras</th><th>Operacija</th><th>Kiekis</th><th>Norma</th><th>Brėžinys</th><th>Būsena</th><th></th></tr></thead><tbody>
-      ${ts.map(t => `<tr><td class="num">${t.seq}</td><td class="mono">${esc(t.centre_code)}</td><td>${esc(t.name)}</td>
+      const rel = !!a.released_at;
+      return `<div class="asm"><div class="row between"><h3><span class="mono">${esc(a.code)}</span> ${esc(a.name)} <span class="muted">× ${a.qty}${a.requires ? ` · laukia mazgų ${esc(a.requires)}` : ""}</span></h3>
+        <div class="row">${rel ? pill("baigta", `išleista į gamybą ${dt(a.released_at)}`) : ts.length ? pill("laukia", "juodraštis – neišleista") : ""}
+          ${ts.length ? `<a class="btn ghost small" href="#/r/${a.id}">Srautas ir atsekamumas →</a>` : ""}</div></div>
+      <div class="tbl"><table><thead><tr><th>Seka</th><th>Detalė</th><th>Centras</th><th>Operacija</th><th>Kiekis</th><th>Norma</th><th>Brėžinys</th><th>Būsena</th><th></th></tr></thead><tbody>
+      ${ts.map(t => `<tr><td class="num">${t.seq}</td><td class="mono">${t.part_no ? esc(t.part_no) : '<span class="muted">mazgas</span>'}</td><td class="mono">${esc(t.centre_code)}</td><td>${esc(t.name)}</td>
         <td class="num">${t.qty_good}/${t.qty_plan}${t.qty_scrap ? ` <span class="s-late">brokas ${t.qty_scrap}</span>` : ""}</td>
         <td class="num">${t.norm_min ? t.norm_min + " min/vnt" : "—"}</td>
         <td>${t.drawing_no ? `<a href="/api/drawings/${encodeURIComponent(t.drawing_no)}/file?rev=${encodeURIComponent(t.drawing_rev)}" target="_blank">${esc(t.drawing_no)} ${esc(t.drawing_rev)}</a>` : "—"}</td>
         <td>${pill(t.status, t.status)}${t.approved ? "" : ' <span class="muted">nepatvirtinta</span>'}</td>
-        <td>${edt && t.status === "laukia" && !t.qty_good ? `<button class="small ghost" data-del="${t.id}">Šalinti</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">Operacijų nėra.</td></tr>`}
+        <td>${edt && !rel && t.status === "laukia" && !t.qty_good ? `<button class="small ghost" data-del="${t.id}">Šalinti</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">Operacijų nėra.</td></tr>`}
       </tbody></table></div>
-      ${edt ? `<form class="inline newt" data-a="${a.id}" style="margin-top:8px">
+      ${edt && rel ? `<p class="muted">Maršrutas išleistas į gamybą ir užrakintas. Keisti – „Srautas ir atsekamumas“ → „Keisti maršrutą“.</p>` : ""}
+      ${edt && !rel ? `<form class="inline newt" data-a="${a.id}" style="margin-top:8px">
         <label>Seka<input name="seq" type="number" style="width:70px" placeholder="auto" id="nt-q-${a.id}"></label>
+        <label>Detalė<input name="part_no" style="width:110px" placeholder="tuščia – mazgas" id="nt-p-${a.id}"></label>
         <label>Centras<select name="centre_id" required id="nt-c-${a.id}">${byArea(centres).map(g => `<optgroup label="${esc(g.name)}">${g.items.map(c => `<option value="${c.id}">${esc(c.code)} ${esc(c.name)}</option>`).join("")}</optgroup>`).join("")}</select></label>
         <label>Operacija<input name="name" required id="nt-n-${a.id}"></label>
         <label>Kiekis<input name="qty_plan" type="number" min="1" value="${a.qty}" style="width:70px" id="nt-k-${a.id}"></label>
@@ -658,7 +666,8 @@ async function pagePlan(code) {
     <div class="tbl"><table><thead><tr><th>#</th><th>Projektas · mazgas</th><th>Operacija</th><th>Kiekis</th><th>Terminas</th><th>Būsena</th><th>Kliūtis</th><th></th></tr></thead>
     <tbody>${r.tasks.map((t, i) => `<tr class="${t.approved ? "" : "dim"}">
       <td class="num">${i + 1}</td><td><b class="mono">${esc(t.project_code)}</b> · ${esc(t.assembly_code)} ${esc(t.assembly_name)}</td>
-      <td>${esc(t.name)}</td><td class="num">${t.qty_good}/${t.qty_plan}</td><td class="num">${esc(t.due_date || "—")} <span class="muted">P${t.priority}</span></td>
+      <td>${esc(t.name)}${t.part_no ? ` <span class="muted mono">${esc(t.part_no)}</span>` : ""}<div class="muted small">→ ${t.next.map(d => d.task_id ? esc(d.centre_code) : esc(d.label)).join(", ")}</div></td>
+      <td class="num">${t.qty_good}/${t.qty_plan}</td><td class="num">${esc(t.due_date || "—")} <span class="muted">P${t.priority}</span></td>
       <td>${pill(t.status, t.status)} ${t.approved ? "" : '<span class="muted">nepatvirtinta</span>'}</td>
       <td class="lock">${esc(t.lock || "")}${t.components_missing ? `<div class="warn">⚠ negauti komponentai: ${t.components_missing} eil.</div>` : ""}</td>
       <td class="row" style="flex-wrap:nowrap"><button class="small ghost" data-mv="top" data-id="${t.id}" title="Į pradžią">⤒</button>
@@ -681,19 +690,21 @@ async function pageTerminal(code) {
     return;
   }
   localStorage.setItem("pf.term", code);
-  let data;
+  let data, scanFocus = false;   // skaitytuvas veikia kaip klaviatūra – fokusas išlieka po atnaujinimo
   const draw = async () => {
     data = await GET(`/api/terminal/${code}`);
     const run = data.running;
     const first = data.queue.findIndex(t => !t.lock);
     app().innerHTML = `<div class="tm">
       <div class="row between"><h1><span class="mono">${esc(data.centre.code)}</span> ${esc(data.centre.name)}</h1>
-        <div class="row"><span class="muted">${esc(S.me.name)}</span>${centres.length > 1 ? `<button class="ghost" id="chg">Kitas centras</button>` : ""}</div></div>
+        <div class="row"><input id="scan" class="scan" placeholder="▦ Skenuokite maršruto lapą" autocomplete="off" aria-label="Maršruto lapo QR">
+          <span class="muted">${esc(S.me.name)}</span>${centres.length > 1 ? `<button class="ghost" id="chg">Kitas centras</button>` : ""}</div></div>
       ${run ? runCard(run) : `<div class="card"><h2>Šiuo metu niekas nevykdoma</h2><p class="muted">${first >= 0 ? "Pradėkite pažymėtą užduotį eilėje." : data.queue.length ? "Visos eilės užduotys šiuo metu užrakintos – priežastys nurodytos prie kiekvienos." : "Patvirtintoje eilėje užduočių nėra."}</p></div>`}
       <div class="card"><h2>Eilė</h2>${data.queue.map((t, i) => `
-        <div class="q ${!run && i === first ? "next" : ""}">
+        <div class="q ${!run && i === first ? "next" : ""}" data-q="${t.id}">
           <div><b>${esc(t.project_code)} · ${esc(t.assembly_code)} ${esc(t.assembly_name)}</b><br>${esc(t.name)} · ${t.qty_plan - t.qty_good} vnt.${t.qty_good ? ` (padaryta ${t.qty_good})` : ""}
             ${t.drawing_no ? ` · <a href="/api/drawings/${encodeURIComponent(t.drawing_no)}/file?rev=${encodeURIComponent(t.drawing_current || t.drawing_rev)}" target="_blank">brėžinys ${esc(t.drawing_no)}</a>` : ""}
+            ${flowLine(t)}
             ${t.lock ? `<div class="lock">🔒 ${esc(t.lock)}</div>` : ""}
             ${t.components_missing ? `<div class="warn">⚠ Negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}</div>
           <div>${t.lock && t.lock.includes("revizija") && can("ack_rev") ? `<button class="b-pause" data-ack="${t.id}">Patvirtinti reviziją</button>` : ""}
@@ -703,6 +714,10 @@ async function pageTerminal(code) {
       ${data.done_today.length ? `<div class="card"><h2>Atlikta šiandien</h2>${data.done_today.map(t => `<div class="muted">✓ ${esc(t.project_code)} · ${esc(t.assembly_code)} ${esc(t.name)} – ${t.qty_good} vnt.${t.qty_scrap ? `, brokas ${t.qty_scrap}` : ""}</div>`).join("")}</div>` : ""}
     </div>`;
     const chg = $("#chg"); if (chg) chg.onclick = () => { localStorage.removeItem("pf.term"); location.hash = "#/t"; };
+    const scan = $("#scan");
+    if (scanFocus) scan.focus();
+    scan.onfocus = () => (scanFocus = true); scan.onblur = () => (scanFocus = false);
+    scan.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); onScan(scan.value.trim(), data); scan.value = ""; } };
     $$("[data-start]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/terminal/${b.dataset.start}/start`), "Pradėta"); draw(); });
     $$("[data-ack]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/tasks/${b.dataset.ack}/ack_revision`), "Revizija patvirtinta"); draw(); });
     if (run) wireRun(run, draw);
@@ -719,9 +734,10 @@ async function pageTerminal(code) {
 function runCard(t) {
   const paused = !!t.pause;
   const revOk = !t.drawing_current || t.drawing_current === t.drawing_rev;
-  return `<div class="card now ${paused ? "paused" : ""}">
+  return `<div class="card now ${paused ? "paused" : ""}" data-q="${t.id}">
     <div class="muted">${paused ? "PRISTABDYTA" : "DABAR VYKDOMA"} · projektas ${esc(t.project_code)} ${esc(t.project_name)}</div>
     <h2 style="font-size:22px">${esc(t.assembly_code)} ${esc(t.assembly_name)} · ${esc(t.name)}</h2>
+    ${flowLine(t)}
     <div class="timer" id="timer">${dur(t.work_s + (paused ? 0 : since(t.since)))}</div>
     ${t.components_missing ? `<div class="warn">⚠ Šiam mazgui dar negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}
     ${paused ? `<div style="color:var(--pause)">⏸ ${esc(t.pause.reason_label)}${t.pause.note ? ` – ${esc(t.pause.note)}` : ""} · <span id="ptimer">${dur(since(t.pause.start))}</span></div>` : ""}
@@ -767,12 +783,145 @@ function wireRun(t, redraw) {
         if ($("#st-fin").checked) body.finish = true;
         const r = await act(() => POST(`/api/terminal/${t.id}/stop`, body), "Įrašyta");
         closeModal();
-        if (r.suggest_ncr) ncrModal({ task_id: t.id, qty: body.scrap, title: "Užregistruokite broką kaip neatitiktį" }, redraw);
-        else redraw();
+        const then = () => r.suggest_ncr ? ncrModal({ task_id: t.id, qty: body.scrap, title: "Užregistruokite broką kaip neatitiktį" }, redraw) : redraw();
+        if (r.moved > 0) moveModal(r, then); else then();
       };
     });
   };
   $("#b-ncr").onclick = () => ncrModal({ task_id: t.id }, redraw);
+}
+
+// ---------- technologinis srautas ----------
+const routeUrl = (aid, part) => `${location.origin}${location.pathname}#/r/${aid}${part ? `/d/${encodeURIComponent(part)}` : ""}`;
+const destText = d => d.task_id ? `<b class="mono">${esc(d.centre_code)}</b> ${esc(d.name)}${d.assembly ? ` <span class="muted">(mazgas ${esc(d.assembly)})</span>` : ""}` : esc(d.label);
+
+// Iš kur detalės ateina ir kur keliaus – operatorius mato srautą prie kiekvienos užduoties
+function flowLine(t) {
+  const from = (t.from || []).map(f => `${f.part_no && f.part_no !== t.part_no ? `${esc(f.part_no)} iš ` : ""}<b class="mono">${esc(f.centre_code)}</b>${f.done ? " ✓" : f.qty_good ? ` (${f.qty_good} vnt.)` : " …"}`);
+  return `<div class="flow">${t.part_no ? `Detalė <b class="mono">${esc(t.part_no)}</b> · ` : ""}${from.length ? `iš ← ${from.join(", ")} · ` : ""}${t.arrived ? `atkeliavo ${t.arrived} vnt. · ` : ""}toliau → ${(t.next || []).map(destText).join(", ")}</div>`;
+}
+
+// Po Stop: kur nunešti padarytas detales – didelėmis raidėmis, kad matytųsi iš toli
+function moveModal(r, after) {
+  modal(`<div class="move"><div class="muted">PERDUOKITE ${r.moved} VNT.</div>
+    ${(r.next || []).map(d => `<div class="dest"><span class="arrow">→</span><div>${d.task_id
+      ? `<div class="big-c mono">${esc(d.centre_code)}</div><div>${esc(d.centre_name)}${d.area_name ? ` · ${esc(d.area_name)}` : ""}</div>
+         <div class="muted">${esc(d.name)}${d.assembly ? ` · mazgas ${esc(d.assembly)}` : ""}${d.joins > 1 ? ` · čia susilieja ${d.joins} detalės` : ""}</div>`
+      : `<div class="big-c">${esc(d.label)}</div>`}</div></div>`).join("")}
+    <button id="mv-ok" class="b-ok">Supratau</button></div>`, () => { $("#mv-ok").onclick = () => { closeModal(); after(); }; });
+}
+
+// Maršruto lapo QR: skaitytuvas „įrašo“ nuorodą ir Enter. Randama šio centro
+// užduotis; jei detalė čia neateina – parodoma, kur ji turi būti.
+async function onScan(text, data) {
+  const m = text.match(/#\/r\/(\d+)(?:\/d\/([^/?#\s]+))?/);
+  if (!m) { toast("Tai ne VMGT maršruto lapas", true); return; }
+  const aid = +m[1], part = m[2] ? decodeURIComponent(m[2]) : "";
+  const all = [data.running, ...data.queue].filter(Boolean);
+  const hit = all.find(t => t.assembly_id === aid && (t.part_no || "") === part) || all.find(t => t.assembly_id === aid);
+  if (hit) {
+    const el = $(`[data-q="${hit.id}"]`) || $(".now");
+    el.classList.add("hit"); el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => el.classList.remove("hit"), 4000);
+    toast(`Rasta: ${hit.assembly_code} · ${hit.name}`);
+    return;
+  }
+  const r = await act(() => GET(`/api/route/${aid}`));
+  const lane = part ? r.branches.find(b => b.part === part) : r.main;
+  const here = lane ? lane.ops.filter(o => o.here) : [];
+  const mine = lane && lane.ops.find(o => o.centre_code === data.centre.code);
+  const what = part ? `Detalė ${esc(part)}` : "Mazgas";
+  const title = !mine ? `${what} į ${esc(data.centre.code)} neateina`
+    : mine.status === "baigta" ? `${what} čia jau apdirbta` : `${what} dar ne šio centro eilėje`;
+  modal(`<h2>${title}</h2>
+    ${mine && mine.status !== "baigta" ? `<p class="lock">${esc(mine.lock || (mine.approved ? "" : "Laukia planuotojo patvirtinimo"))}</p>` : ""}
+    <p>${esc(r.assembly.project_code)} · ${esc(r.assembly.code)} ${esc(r.assembly.name)}</p>
+    ${here.length ? `<p>Dabar: ${here.map(o => `<b class="mono">${esc(o.centre_code)}</b> – ${esc(o.here)}`).join(", ")}</p>` : lane && lane.done ? `<p>Atšaka baigta, toliau → ${lane.next.map(destText).join(", ")}</p>` : ""}
+    ${lane ? `<p class="muted">Srautas: ${lane.ops.map(o => esc(o.centre_code)).join(" → ")}</p>` : ""}
+    <button id="sc-x">Uždaryti</button>`, () => { $("#sc-x").onclick = closeModal; });
+}
+
+function opBox(o) {
+  return `<div class="op st-${esc(o.status)}">
+    <div class="row between"><b class="mono">${esc(o.centre_code)}</b><span class="num">${o.qty_good}/${o.qty_plan}${o.qty_scrap ? ` <span class="s-late">−${o.qty_scrap}</span>` : ""}</span></div>
+    <div>${esc(o.name)}</div>
+    <div class="muted small">${esc(o.area_name || "")}${o.seq ? ` · seka ${o.seq}` : ""}</div>
+    ${o.here ? `<div class="here">📍 ${esc(o.here)}</div>` : ""}
+    ${o.lock && o.here ? `<div class="lock small">🔒 ${esc(o.lock)}</div>` : ""}</div>`;
+}
+const laneOps = ops => ops.map(opBox).join(`<span class="arr" aria-hidden="true">→</span>`);
+
+async function pageRoute(aid, part) {
+  part = part ? decodeURIComponent(part) : "";
+  const r = await GET(`/api/route/${aid}`);
+  const a = r.assembly, edit = can("release");
+  const lanes = r.branches.map(b => `<div class="lane ${part && b.part === part ? "sel" : ""}">
+      <div class="lane-h">Detalė <b class="mono">${esc(b.part)}</b> ${b.done ? pill("baigta", "atšaka baigta") : ""}</div>
+      <div class="ops">${laneOps(b.ops)}${r.main ? "" : `<span class="arr">→</span><div class="op end">${b.next.map(destText).join("<br>")}</div>`}</div></div>`).join("");
+  app().innerHTML = `
+  <div class="row between"><div>${can("view") ? `<a href="#/p/${a.project_id}/gamyba">← ${esc(a.project_code)} gamyba</a>` : ""}
+      <h1><span class="mono">${esc(a.code)}</span> ${esc(a.name)} <span class="muted">× ${a.qty}</span></h1>
+      <p class="muted">${esc(a.project_code)} ${esc(a.project_name)} · technologinis srautas ir atsekamumas</p></div>
+    <div class="row">${r.released ? pill("baigta", `išleista ${dt(a.released_at)}${a.released_by_name ? ` · ${a.released_by_name}` : ""}`) : pill("laukia", "juodraštis – neišleista")}
+      <a class="btn ghost" href="#/r/${a.id}/lapai">🖨 Maršruto lapai</a>
+      ${edit && !r.released ? `<button id="rel" ${r.check.errors.length ? "disabled" : ""}>Išleisti į gamybą</button>` : ""}
+      ${edit && r.released ? `<button class="ghost" id="unrel">Keisti maršrutą</button>` : ""}</div></div>
+  ${!r.released && (r.check.errors.length || r.check.warnings.length) ? `<div class="card">
+    <h2>Prieš išleidžiant</h2>${r.check.errors.map(e => `<div class="lock">✖ ${esc(e)}</div>`).join("")}${r.check.warnings.map(w => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}
+    <p class="muted">Klaidos draudžia išleisti, įspėjimai – ne. Operacijas keiskite projekto kortelėje „Gamyba“.</p></div>` : ""}
+  ${!r.released ? `<p class="muted">Kol maršrutas neišleistas, planuotojas jo užduočių negali patvirtinti, o terminalas – pradėti.</p>` : ""}
+  <div class="card"><h2>Srautas</h2>
+    ${r.requires.length ? `<p>Į šį mazgą ateina: ${r.requires.map(x => `<a href="#/r/${x.id}" class="mono">${esc(x.code)}</a> ${esc(x.name)} ${x.done ? "✓" : "…"}`).join(", ")}</p>` : ""}
+    <div class="flowmap">${lanes || ""}
+      ${r.main ? `${r.branches.length ? `<div class="join">⤵ ${r.branches.length > 1 ? `${r.branches.length} detalės susilieja` : "detalė keliauja"} į mazgą</div>` : ""}
+      <div class="lane main ${!part ? "sel" : ""}"><div class="lane-h">Mazgas <b class="mono">${esc(a.code)}</b> ${r.main.done ? pill("baigta", "baigtas") : ""}</div>
+        <div class="ops">${laneOps(r.main.ops)}<span class="arr">→</span><div class="op end">${r.main.next.map(destText).join("<br>")}</div></div></div>` : ""}
+      ${!r.main && !r.branches.length ? `<p class="muted">Operacijų dar nėra.</p>` : ""}</div></div>
+  <div class="card"><h2>Perdavimai</h2>
+    ${simple(r.transfers, ["Laikas", "Iš", "Kiekis", "Į", "Kas"], m => [
+      `<span class="num">${dt(m.at)}</span>`, `<span class="mono">${esc(m.from_centre)}</span> ${esc(m.from_name)}${m.from_part ? ` <span class="muted">${esc(m.from_part)}</span>` : ""}`,
+      `<span class="num">${m.qty}</span>`, esc(m.to_label) + (m.to_assembly && m.to_assembly !== a.code ? ` <span class="muted">(mazgas ${esc(m.to_assembly)})</span>` : ""), esc(m.user_name || "—")])}</div>`;
+  const rel = $("#rel");
+  if (rel) rel.onclick = async () => {
+    const res = await act(() => POST(`/api/route/${aid}/release`), "Maršrutas išleistas į gamybą");
+    if (res.warnings.length) toast(`Išleista su įspėjimais: ${res.warnings.length}`);
+    pageRoute(aid, part);
+  };
+  const un = $("#unrel");
+  if (un) un.onclick = () => modal(`<h2>Keisti maršrutą</h2>
+    <p class="muted">Pradėti darbai tęsiami, nepradėti užrakinami, kol maršrutą išleisite iš naujo. Priežastis lieka žurnale.</p>
+    <label>Kodėl keičiama<input id="ur-why" required></label>
+    <div class="row"><button id="ur-ok">Grąžinti keisti</button><button class="ghost" id="ur-x">Atšaukti</button></div>`, () => {
+    $("#ur-x").onclick = closeModal;
+    $("#ur-ok").onclick = async () => { await act(() => POST(`/api/route/${aid}/unrelease`, { reason: $("#ur-why").value }), "Maršrutas grąžintas keisti"); closeModal(); pageRoute(aid, part); };
+  });
+  S.timers.push(setInterval(() => { if ($("#modal").hidden && location.hash.startsWith(`#/r/${aid}`) && !location.hash.endsWith("/lapai")) pageRoute(aid, part); }, 20000));
+}
+
+// Maršruto lapai: po vieną kiekvienai detalei ir mazgui. Lapas keliauja su
+// detalėmis, jo QR terminale atidaro užduotį, telefone – šį srautą.
+async function pageRouteCards(aid) {
+  const r = await GET(`/api/route/${aid}`);
+  const a = r.assembly;
+  const sheet = (lane, part) => `<section class="rcard">
+    <div class="rc-head"><div>
+      <div class="muted">MARŠRUTO LAPAS${r.released ? "" : " · JUODRAŠTIS – NEIŠLEISTA Į GAMYBĄ"}</div>
+      <h2>${part ? `Detalė <span class="mono">${esc(part)}</span>` : `Mazgas <span class="mono">${esc(a.code)}</span>`}</h2>
+      <div><b class="mono">${esc(a.project_code)}</b> ${esc(a.project_name)}</div>
+      <div>Mazgas <b class="mono">${esc(a.code)}</b> ${esc(a.name)} × ${a.qty}${lane.ops[0] && lane.ops[0].drawing_no ? ` · brėžinys ${esc(lane.ops[0].drawing_no)} ${esc(lane.ops[0].drawing_rev)}` : ""}</div>
+      ${!part && r.branches.length ? `<div>Susilieja detalės: ${r.branches.map(b => `<span class="mono">${esc(b.part)}</span>`).join(", ")}</div>` : ""}</div>
+      <img class="qr" alt="QR" src="/api/qr?data=${encodeURIComponent(routeUrl(a.id, part))}"></div>
+    <table><thead><tr><th>Seka</th><th>Centras</th><th>Operacija</th><th>Kiekis</th><th>Norma</th><th>Atlikta: data, parašas</th></tr></thead>
+    <tbody>${lane.ops.map(o => `<tr><td class="num">${o.seq}</td><td><b class="mono">${esc(o.centre_code)}</b><br><small>${esc(o.area_name || "")}</small></td>
+      <td>${esc(o.name)}</td><td class="num">${o.qty_plan}</td><td class="num">${o.norm_min ? `${o.norm_min} min/vnt` : ""}</td><td class="sign"></td></tr>`).join("")}</tbody></table>
+    <p><b>Baigus → </b>${lane.next.map(d => d.task_id ? `${esc(d.centre_code)} ${esc(d.centre_name)} · ${esc(d.name)}${d.assembly ? ` (mazgas ${esc(d.assembly)})` : ""}` : esc(d.label)).join("; ")}</p>
+  </section>`;
+  app().innerHTML = `<div class="row between noprint"><div><a href="#/r/${a.id}">← Srautas</a><h1>Maršruto lapai · ${esc(a.code)} ${esc(a.name)}</h1>
+      <p class="muted">${r.branches.length + (r.main ? 1 : 0)} lapai: kiekvienai detalei ir mazgui. Lapas keliauja kartu su detalėmis.</p></div>
+    <button id="pr">🖨 Spausdinti</button></div>
+    ${r.released ? "" : `<p class="warn noprint">Maršrutas dar neišleistas į gamybą – lapai pažymėti kaip juodraštis.</p>`}
+    <div class="rcards">${r.branches.map(b => sheet(b, b.part)).join("")}${r.main ? sheet(r.main, "") : ""}</div>`;
+  $("#pr").onclick = () => window.print();
 }
 
 function ncrModal(pre, after, projects) {

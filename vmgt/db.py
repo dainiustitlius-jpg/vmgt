@@ -313,6 +313,25 @@ MIGRATIONS: list[str] = [
     ALTER TABLE phases ADD COLUMN hours REAL;
     ALTER TABLE phases ADD COLUMN department_id INTEGER REFERENCES departments(id);
     """,
+    # 7 – technologinis srautas ir detalių atsekamumas: technologas išleidžia
+    # mazgo maršrutą į gamybą, kiekvienas perdavimas kitam centrui įrašomas
+    """
+    ALTER TABLE assemblies ADD COLUMN released_at TEXT;
+    ALTER TABLE assemblies ADD COLUMN released_by INTEGER REFERENCES users(id);
+    -- esamos bazės maršrutai jau dirba ceche – laikomi išleistais
+    UPDATE assemblies SET released_at = (SELECT MIN(created) FROM tasks WHERE assembly_id = assemblies.id)
+        WHERE EXISTS (SELECT 1 FROM tasks WHERE assembly_id = assemblies.id);
+    CREATE TABLE transfers (
+        id INTEGER PRIMARY KEY,
+        from_task_id INTEGER NOT NULL REFERENCES tasks(id),
+        to_task_id INTEGER REFERENCES tasks(id),   -- NULL – mazgas baigtas, į sandėlį
+        qty INTEGER NOT NULL,
+        at TEXT NOT NULL,
+        user_id INTEGER REFERENCES users(id)
+    );
+    CREATE INDEX ix_transfers_from ON transfers (from_task_id);
+    CREATE INDEX ix_transfers_to ON transfers (to_task_id);
+    """,
 ]
 
 

@@ -48,6 +48,9 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
 | `services/importer.py` | Maršrutų CSV importas (vėliau – D365 / PDM) |
 | `services/components.py` | Komponentų pirkimai: eilutės, gavimai, CSV importas iš ERP eksporto, tiekėjų patikimumas |
+| `services/actions.py` | Projekto komandos užduotys: statusai, leistini perėjimai, istorija |
+| `services/meetings.py` | Susitikimų protokolai (MoM): veiksmai → užduotys, patvirtinimas |
+| `services/health.py` | Projekto sveikata realiu laiku: 4 sritys, lygiai, priežastys |
 | `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
 | `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
 | `vmgt/web/static/` | `index.html`, `app.js` (hash maršrutai), `app.css` – be surinkimo įrankio |
@@ -84,6 +87,47 @@ kiti → gamyba) ir projektą perkelia iš krepšelio į vykdomus.
 sumą, o atvirą naršyklė prideda pati kas sekundę. Iki 2026-10-24 terminalas
 gaudavo sumą su atviru intervalu ir jį pridėdavo dar kartą (8:02 vietoj
 6:00). `test_terminalo_laikas_be_atviro_intervalo`.
+
+## Projekto valdymas (nuo 2026-10-25)
+
+Vartotojo sprendimai (2026-10-25): užduotys – **projekto komandos** (biuro)
+darbai, ne cecho operacijos; protokolo **veiksmai tampa užduotimis**;
+sveikata – visos 4 sritys. Projekto puslapis – kortelės `#/p/<id>/<kortelė>`:
+sveikata (numatyta), planas, užduotys, susitikimai, gamyba, komponentai,
+neatitiktys. Meniu „Užduotys“ (`#/uzduotys`) – mano / visų projektų Kanban.
+
+**Užduotys (`actions`, migracija 5).** Statusai: nauja → vykdoma → laukia →
+peržiūra → atlikta / atšaukta; tik `actions.TRANSITIONS` perėjimai (pvz.
+nauja → atlikta neleidžiama; atlikta → vykdoma – atidaryti iš naujo).
+Laukiant ir atšaukiant **priežastis būtina** (`wait_reason`). Kiekvienas
+pakeitimas, redagavimas ir komentaras – `action_log` (istorija lange, laukimo
+trukmė `wait_seconds`). Keisti visas – teisė `actions`; savo užduoties
+statusą ir komentarus – pats atsakingasis, kad ir kokia rolė (operatorius
+mato `?owner=me`). Vėluoja – terminas praėjo, o būsena atvira.
+
+**Protokolai (`meetings`).** Dalyviai (vartotojai + svečiai tekstu),
+darbotvarkė, aptarta, sprendimai (po vieną eilutėje), veiksmai. Kiekvienas
+veiksmas su pavadinimu – iškart `actions` su `meeting_id`. Kitame susitikime
+rodomi **ankstesnių susitikimų neuždaryti veiksmai** (`review`). Patvirtintas
+protokolas užrakinamas (tekstas – susitarimo įrašas), iš jo kilusios užduotys
+gyvena toliau. Tekstas el. laiškui – `as_text`, „Kopijuoti“, spausdinimas
+(`@media print`). Vesti / tvirtinti – teisė `meetings` (vadovas, admin).
+
+**Sveikata (`health.project_health`).** Sritys ir svoriai: terminai ir etapai
+35 %, užduotys ir gamyba 25 %, komponentai 25 %, kokybė 15 %. Kiekviena –
+žalia / geltona / raudona, išvada ir **priežasčių sąrašas**. Bendras lygis –
+**blogiausia sritis** (vidurkis paslėptų vieną kritišką), balas – svertinis
+vidurkis. Ribos – `health.LIMITS`.
+
+| Sritis | Kas tikrinama |
+|---|---|
+| Terminai | vėluojantys / laiku nepradėti etapai; prognozė = paskutinio neužbaigto etapo pabaiga + didžiausias dabartinis atsilikimas (be etapų priklausomybių – sąmoningai paprasta ir paaiškinama); prognozė > terminas – raudona |
+| Užduotys ir gamyba | vėluojančios ir laukiančios užduotys; cecho operacijų atlikta dalis (pagal normuotas valandas) prieš laiko eigą gamybos / surinkimo / testavimo etapų lange; faktas / norma |
+| Komponentai | reikėjo – negauta, tiekėjas vėluoja, rizika, neužsakyta (`components.decorate`) |
+| Kokybė | atviros neatitiktys ir jų amžius, broko dalis |
+
+Portfelyje (krepšelis) – sveikatos ženklas ir 4 srities taškai; projekto
+sveikatos kortelė atsinaujina kas 30 s. `test_projekto_valdymas.py`.
 
 ## Gamybos barai (nuo 2026-10-25)
 

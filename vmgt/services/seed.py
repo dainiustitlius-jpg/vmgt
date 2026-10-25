@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import auth, components, drawings, projects, tasks
+from . import actions, auth, components, drawings, meetings, projects, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -232,6 +232,65 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
             when = (today + timedelta(days=days)).replace(hour=10, minute=0, second=0)
             at(when)
             components.receive(con, uid["sandelis"], cid_, q, when=when.isoformat(timespec="seconds"))
+
+        # --- projekto valdymas: susitikimai, iš jų kilę veiksmai, užduočių eiga ---
+        U = lambda login: db.row(con.execute("SELECT * FROM users WHERE login=?", (login,)))
+        vad = U("vadovas")
+        mt = lambda days, h: (today + timedelta(days=days)).replace(hour=h, minute=0, second=0)
+        at(mt(-14, 9))
+        m1 = meetings.save(con, vad, {
+            "project_id": p1, "title": "Projekto pradžios susitikimas", "held_at": mt(-14, 9).isoformat(timespec="minutes"),
+            "location": "Pasitarimų kambarys 2", "chair_id": uid["vadovas"],
+            "attendees": [uid["vadovas"], uid["technologas"], uid["pirkimai"], uid["meistras"], uid["meistras2"]],
+            "guests": "J. Užsakovas (UAB Pavyzdinė gamyba)",
+            "agenda": "1. Projekto apimtis ir terminai\n2. Ilgo pristatymo komponentai\n3. Gamybos pradžia",
+            "notes": "Užsakovas patvirtino linijos išdėstymą. Motoreduktorių pristatymas – 10–14 d.",
+            "decisions": "Galutinis terminas – pagal sutartį, be pakeitimų\nPLC ir HMI užsakyti iš UAB Automatika\n"
+                         "Mazgo 100 gamyba pradedama, kai išleisti brėžiniai rev. A",
+            "new_actions": [
+                {"title": "Užsakyti ilgo pristatymo komponentus (motoreduktoriai, PLC, HMI)", "owner_id": uid["pirkimai"],
+                 "due_date": d(-12), "priority": 1},
+                {"title": "Išleisti mazgo 100 brėžinius gamybai", "owner_id": uid["technologas"], "due_date": d(-11), "priority": 1},
+                {"title": "Suderinti elektros schemą su užsakovu", "owner_id": uid["vadovas"], "due_date": d(-4), "priority": 2},
+                {"title": "Parengti FAT programą", "owner_id": uid["kokybe"], "due_date": d(12), "priority": 2},
+            ]}, )
+        meetings.approve(con, vad, m1)
+        acts = {x["title"]: x["id"] for x in actions.list_actions(con, meeting_id=m1)}
+        A = lambda key: next(v for k, v in acts.items() if k.startswith(key))
+        def st(key, status, who, days, h, reason=""):
+            at(mt(days, h)); actions.set_status(con, U(who), A(key), status, reason)
+        st("Užsakyti ilgo pristat", "vykdoma", "pirkimai", -14, 13); st("Užsakyti ilgo pristat", "atlikta", "pirkimai", -12, 15)
+        st("Išleisti mazgo 100 br", "vykdoma", "technologas", -13, 8); st("Išleisti mazgo 100 br", "perziura", "technologas", -11, 16)
+        st("Išleisti mazgo 100 br", "atlikta", "vadovas", -10, 9)
+        st("Suderinti elektros sc", "vykdoma", "vadovas", -9, 10)
+        st("Suderinti elektros sc", "laukia", "vadovas", -6, 11, "Laukiama užsakovo atsakymo dėl avarinio stabdymo grandinės")
+        at(mt(-5, 14)); actions.comment(con, vad, A("Suderinti elektros"), "Priminta užsakovui el. paštu")
+
+        at(mt(-3, 9))
+        m2 = meetings.save(con, vad, {
+            "project_id": p1, "title": "Savaitinis projekto susitikimas", "held_at": mt(-3, 9).isoformat(timespec="minutes"),
+            "location": "Cechas, DC biuras", "chair_id": uid["vadovas"],
+            "attendees": [uid["vadovas"], uid["meistras"], uid["meistras2"], uid["pirkimai"], uid["kokybe"]],
+            "agenda": "1. Ankstesnių veiksmų peržiūra\n2. Gamybos eiga\n3. Komponentų vėlavimai",
+            "notes": "Lenkimui trūksta 3 mm lakšto. Juostos tiekėjas vėluoja. HMI pristatymas vėlesnis nei reikia.",
+            "decisions": "Lakštą pirkti iš atsarginio tiekėjo\nHMI – ieškoti alternatyvos su greitesniu pristatymu",
+            "new_actions": [
+                {"title": "Nupirkti 3 mm lakštą iš atsarginio tiekėjo", "owner_id": uid["pirkimai"], "due_date": d(-1), "priority": 1},
+                {"title": "Rasti HMI alternatyvą su pristatymu iki termino", "owner_id": uid["pirkimai"], "due_date": d(2), "priority": 1},
+                {"title": "Patikrinti suvirinimo siūles mazge 100", "owner_id": uid["kokybe"], "due_date": d(1), "priority": 2},
+            ]})
+        acts.update({x["title"]: x["id"] for x in actions.list_actions(con, meeting_id=m2)})
+        st("Rasti HMI alternatyv", "vykdoma", "pirkimai", -2, 10)
+        at(mt(-2, 9))
+        actions.create(con, uid["vadovas"], {"project_id": p1, "title": "Atnaujinti projekto planą užsakovui",
+                                             "owner_id": uid["vadovas"], "due_date": d(3), "priority": 3})
+        at(mt(-1, 9))
+        meetings.save(con, vad, {"project_id": p2, "title": "Robotų celės techninis susitikimas",
+                                 "held_at": mt(-1, 9).isoformat(timespec="minutes"), "chair_id": uid["vadovas"],
+                                 "attendees": [uid["vadovas"], uid["technologas"]],
+                                 "agenda": "Roboto modelio pasirinkimas, apsaugų išdėstymas",
+                                 "new_actions": [{"title": "Parengti apsauginės tvoros brėžinius", "owner_id": uid["technologas"],
+                                                  "due_date": d(4), "priority": 2}]})
 
         # nauja brėžinio revizija po užduočių sukūrimo – dažymo užduotis bus užrakinta
         at(today - timedelta(hours=5))

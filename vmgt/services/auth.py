@@ -31,19 +31,22 @@ PERMS = {
     "ncr_manage": "Priskirti ir uždaryti neatitiktis",
     "purchase": "Komponentų pirkimai: eilutės, importas",
     "receive": "Registruoti komponentų gavimą",
+    "actions": "Kurti projekto užduotis ir keisti visų užduotis",
+    "meetings": "Vesti ir tvirtinti susitikimų protokolus",
     "admin": "Vartotojai ir darbo centrai",
 }
 
 ROLES = {
     "admin": ("Administratorius", set(PERMS)),
-    "vadovas": ("Projektų vadovas", {"view", "projects", "tasks", "plan", "docs", "ncr_report", "purchase"}),
-    "pirkimai": ("Pirkimų specialistas", {"view", "purchase", "receive"}),
+    "vadovas": ("Projektų vadovas", {"view", "projects", "tasks", "plan", "docs", "ncr_report", "purchase",
+                                     "actions", "meetings"}),
+    "pirkimai": ("Pirkimų specialistas", {"view", "purchase", "receive", "actions"}),
     "sandelis": ("Sandėlininkas", {"view", "receive"}),
-    "planuotojas": ("Planuotojas", {"view", "plan", "ncr_report"}),
-    "technologas": ("Technologas", {"view", "tasks", "docs", "ncr_report"}),
-    "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report", "receive"}),
+    "planuotojas": ("Planuotojas", {"view", "plan", "ncr_report", "actions"}),
+    "technologas": ("Technologas", {"view", "tasks", "docs", "ncr_report", "actions"}),
+    "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report", "receive", "actions"}),
     "operatorius": ("Operatorius", {"execute", "ncr_report"}),
-    "kokybe": ("Kokybės inžinierius", {"view", "ncr_report", "ncr_manage"}),
+    "kokybe": ("Kokybės inžinierius", {"view", "ncr_report", "ncr_manage", "actions"}),
     "perziura": ("Peržiūra", {"view"}),
 }
 

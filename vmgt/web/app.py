@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import config as cfgmod
 from .. import db
-from ..services import (NotFound, RuleError, analytics, auth, components, drawings, importer, ncr, projects,
-                        seed, tasks)
+from ..services import (NotFound, RuleError, actions, analytics, auth, components, drawings, health, importer,
+                        meetings, ncr, projects, seed, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -108,13 +108,24 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
             "centre_kinds": [{"key": k, "label": v} for k, v in projects.CENTRE_KINDS],
             "pause_reasons": [{"key": k, "label": v} for k, v in tasks.PAUSE_REASONS],
             "ncr_categories": [{"key": k, "label": v} for k, v in ncr.CATEGORIES],
+            "action_statuses": [{"key": k, "label": v} for k, v in actions.STATUSES],
+            "priorities": [{"key": k, "label": v} for k, v in actions.PRIORITIES],
         }
 
     # ---------- projektai ----------
 
     @app.get("/api/projects")
     def project_list(all: int = 0, user=Depends(need("view")), con=Depends(get_con)):
-        return projects.list_projects(con, include_done=bool(all))
+        out = projects.list_projects(con, include_done=bool(all))
+        for p in out:
+            h = health.project_health(con, p["id"])
+            p["health"] = {"level": h["level"], "level_label": h["level_label"], "score": h["score"],
+                           "dims": {d["key"]: d["level"] for d in h["dimensions"]}}
+        return out
+
+    @app.get("/api/projects/{pid}/health")
+    def project_health(pid: int, user=Depends(need("view")), con=Depends(get_con)):
+        return health.project_health(con, pid)
 
     @app.post("/api/projects")
     def project_new(body: dict, user=Depends(need("projects")), con=Depends(get_con)):
@@ -282,6 +293,69 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.post("/api/ncr/{nid}/close")
     def ncr_close(nid: int, body: dict, user=Depends(need("ncr_manage")), con=Depends(get_con)):
         ncr.close(con, user, nid, body.get("resolution", ""))
+        return {"ok": True}
+
+    # ---------- projekto komandos užduotys ----------
+
+    @app.get("/api/actions")
+    def action_list(project_id: int | None = None, owner: str | None = None, status: str | None = None,
+                    user=Depends(get_user), con=Depends(get_con)):
+        owner_id = user["id"] if owner == "me" else (int(owner) if owner else None)
+        if owner_id != user["id"] and "view" not in auth.perms_of(user):
+            raise HTTPException(403, "Galite matyti tik savo užduotis")
+        return actions.list_actions(con, project_id, owner_id, status or None)
+
+    @app.post("/api/actions")
+    def action_new(body: dict, user=Depends(need("actions")), con=Depends(get_con)):
+        return {"id": actions.create(con, user["id"], body)}
+
+    @app.get("/api/actions/{aid}")
+    def action_get(aid: int, user=Depends(get_user), con=Depends(get_con)):
+        x = actions.get(con, aid)
+        if x["owner_id"] != user["id"] and "view" not in auth.perms_of(user):
+            raise HTTPException(403, "Ne jūsų užduotis")
+        x["history"] = actions.history(con, aid)
+        x["can_edit"] = actions.can_edit(user, x)
+        return x
+
+    @app.put("/api/actions/{aid}")
+    def action_put(aid: int, body: dict, user=Depends(get_user), con=Depends(get_con)):
+        actions.update(con, user, aid, body)
+        return {"ok": True}
+
+    @app.post("/api/actions/{aid}/status")
+    def action_status(aid: int, body: dict, user=Depends(get_user), con=Depends(get_con)):
+        return actions.set_status(con, user, aid, body.get("status", ""), body.get("reason", ""))
+
+    @app.post("/api/actions/{aid}/comment")
+    def action_comment(aid: int, body: dict, user=Depends(get_user), con=Depends(get_con)):
+        actions.comment(con, user, aid, body.get("text", ""))
+        return {"ok": True}
+
+    # ---------- susitikimų protokolai ----------
+
+    @app.get("/api/meetings")
+    def meeting_list(project_id: int | None = None, user=Depends(need("view")), con=Depends(get_con)):
+        return meetings.list_meetings(con, project_id)
+
+    @app.post("/api/meetings")
+    def meeting_new(body: dict, user=Depends(need("meetings")), con=Depends(get_con)):
+        return {"id": meetings.save(con, user, body)}
+
+    @app.get("/api/meetings/{mid}")
+    def meeting_get(mid: int, user=Depends(need("view")), con=Depends(get_con)):
+        m = meetings.get(con, mid)
+        m["text"] = meetings.as_text(m)
+        return m
+
+    @app.put("/api/meetings/{mid}")
+    def meeting_put(mid: int, body: dict, user=Depends(need("meetings")), con=Depends(get_con)):
+        meetings.save(con, user, body, mid)
+        return {"ok": True}
+
+    @app.post("/api/meetings/{mid}/approve")
+    def meeting_approve(mid: int, user=Depends(need("meetings")), con=Depends(get_con)):
+        meetings.approve(con, user, mid)
         return {"ok": True}
 
     # ---------- komponentų pirkimai ----------

@@ -80,7 +80,11 @@ function formData(form) {
 const ROUTES = [
   [/^#\/login$/, pageLogin],
   [/^#\/?$/, pageHome],
-  [/^#\/p\/(\d+)$/, pageProject],
+  [/^#\/p\/(\d+)(?:\/(\w+))?$/, pageProject],
+  [/^#\/uzduotys$/, pageMyActions],
+  [/^#\/m\/(\d+)$/, pageMeeting],
+  [/^#\/m\/(naujas)\/(\d+)$/, pageMeetingEdit],
+  [/^#\/m\/(\d+)\/keisti$/, pageMeetingEdit],
   [/^#\/cechas$/, pageFloor],
   [/^#\/planas(?:\/([\w-]+))?$/, pagePlan],
   [/^#\/t(?:\/([\w-]+))?$/, pageTerminal],
@@ -114,11 +118,11 @@ function renderNav() {
   if (!S.me) { top.hidden = true; return; }
   top.hidden = false;
   const items = [
-    ["#/", "Projektai", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
+    ["#/", "Projektai", "view"], ["#/uzduotys", "Užduotys", null], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
     ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"],
     ["#/komponentai", "Komponentai", "view"],
     ["#/analitika", "Analitika", "view"], ["#/duomenys", "Duomenys", "tasks"], ["#/admin", "Administravimas", "admin"],
-  ].filter(x => can(x[2]));
+  ].filter(x => !x[2] || can(x[2]));
   const h = location.hash || "#/";
   $("#nav").innerHTML = items.map(([href, label]) => {
     const on = href === "#/" ? (h === "#/" || h.startsWith("#/p/")) : h.startsWith(href);
@@ -176,18 +180,20 @@ async function pageProjects() {
   <div class="row between"><h1>Projektų krepšelis</h1>
     <label class="row" style="display:flex"><input type="checkbox" id="all" ${all ? "checked" : ""}> rodyti baigtus</label></div>
   <div class="tbl"><table>
-    <thead><tr><th>Projektas</th><th>Užsakovas</th><th>Vadovas</th><th>Terminas</th><th>Būsena</th><th>Vykdomi etapai</th><th>Užduotys</th><th>Neatitiktys</th></tr></thead>
+    <thead><tr><th>Sveikata</th><th>Projektas</th><th>Užsakovas</th><th>Vadovas</th><th>Terminas</th><th>Būsena</th><th>Vykdomi etapai</th><th>Užduotys</th><th>Neatitiktys</th></tr></thead>
     <tbody>${list.map(p => {
       const late = p.due_date && p.due_date < today() && p.status !== "baigtas";
       const pct = p.tasks_total ? Math.round(100 * p.tasks_done / p.tasks_total) : 0;
+      const hd = p.health, dn = { schedule: "Terminai", execution: "Užduotys ir gamyba", components: "Komponentai", quality: "Kokybė" };
       return `<tr class="click" data-id="${p.id}">
+        <td>${healthBadge(hd)}<div class="dims">${Object.entries(hd.dims).map(([k, v]) => dot(v, dn[k])).join("")}</div></td>
         <td><b class="mono">${esc(p.code)}</b><br>${esc(p.name)}</td><td>${esc(p.customer)}</td><td>${esc(p.manager_name || "—")}</td>
         <td class="num ${late ? "s-late" : ""}">${esc(p.due_date || "—")}${late ? " ⚠" : ""}</td>
         <td>${pill(p.status, p.status_label)} <span class="muted">P${p.priority}</span></td>
         <td>${esc(p.active_phases.join(", ") || "—")}</td>
         <td><div class="prog" title="${p.tasks_done} iš ${p.tasks_total}"><i style="width:${pct}%"></i></div><span class="muted num">${p.tasks_done}/${p.tasks_total}</span></td>
         <td>${p.ncr_open ? pill("atvira", p.ncr_open + " atv.") : "—"}</td></tr>`;
-    }).join("") || `<tr><td colspan="8" class="muted">Projektų nėra.</td></tr>`}</tbody></table></div>
+    }).join("") || `<tr><td colspan="9" class="muted">Projektų nėra.</td></tr>`}</tbody></table></div>
   ${can("projects") ? `<div class="card"><h2>Naujas projektas</h2>
     <form id="newp" class="inline">
       <label>Kodas<input name="code" required placeholder="P-24140" id="np-code"></label>
@@ -209,16 +215,22 @@ async function pageProjects() {
 }
 
 // ---------- projekto puslapis ----------
-async function pageProject(pid) {
-  const [p, users, centres] = await Promise.all([GET(`/api/projects/${pid}`), GET("/api/users"), GET("/api/centres?all=1")]);
+async function pageProject(pid, tab) {
+  tab = tab || "sveikata";
+  const [p, users, centres, h] = await Promise.all([GET(`/api/projects/${pid}`), GET("/api/users"), GET("/api/centres?all=1"), GET(`/api/projects/${pid}/health`)]);
   const active = users.filter(u => u.active);
   const ed = can("projects"), edt = can("tasks");
   const asmName = id => { const a = p.assemblies.find(x => x.id === id); return a ? `${a.code} ${a.name}` : "Visas projektas"; };
-  app().innerHTML = `
-  <div class="row between"><div><a href="#/">← Krepšelis</a><h1><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</h1>
-    <p class="muted">${esc(p.customer)} · terminas ${esc(p.due_date || "—")} · vadovas ${esc(p.manager_name || "—")}</p></div>
-    <div>${pill(p.status, p.status_label)}</div></div>
-  ${ed ? `<form id="pedit" class="inline card">
+  const tabs = [["sveikata", "Sveikata"], ["planas", "Planas"], ["uzduotys", "Užduotys"], ["susitikimai", "Susitikimai"],
+    ["gamyba", "Gamyba"], ["komponentai", "Komponentai"], ["neatitiktys", "Neatitiktys"]];
+  const extra = {};
+  if (tab === "uzduotys") extra.actions = await GET(`/api/actions?project_id=${pid}`);
+  if (tab === "susitikimai") extra.meetings = await GET(`/api/meetings?project_id=${pid}`);
+  if (tab === "sveikata") extra.soon = (await GET(`/api/actions?project_id=${pid}&status=open`)).filter(x => x.due_date && x.due_date <= addDays(today(), 7));
+
+  const body = {
+    sveikata: () => healthView(h, p, extra.soon),
+    planas: () => `${ed ? `<form id="pedit" class="inline card">
       <label>Būsena<select name="status" id="pe-status">${opt(S.meta.project_statuses, p.status)}</select></label>
       <label>Vadovas<select name="manager_id" id="pe-man">${opt(active, p.manager_id, "—")}</select></label>
       <label>Terminas<input type="date" name="due_date" value="${esc(p.due_date || "")}" id="pe-due"></label>
@@ -239,8 +251,13 @@ async function pageProject(pid) {
       <label>Etapas<select name="kind" id="nph-k">${opt(S.meta.phase_kinds)}</select></label>
       <label>Atsakingas<select name="owner_id" id="nph-o">${opt(active, "", "—")}</select></label>
       <label>Pradžia<input type="date" name="plan_start" id="nph-s"></label><label>Pabaiga<input type="date" name="plan_end" id="nph-e"></label>
-      <button class="ghost">Pridėti etapą</button></form>` : ""}</div>
-  <div class="card"><h2>Mazgai ir maršrutai</h2>
+      <button class="ghost">Pridėti etapą</button></form>` : ""}</div>`,
+    uzduotys: () => `<div class="card">${actionForm(p, active)}</div><div id="board"></div>`,
+    susitikimai: () => `<div class="row between"><h2>Susitikimų protokolai</h2>${can("meetings") ? `<a class="btn" href="#/m/naujas/${p.id}">+ Naujas protokolas</a>` : ""}</div>
+      ${simple(extra.meetings, ["Data", "Susitikimas", "Pirmininkas", "Veiksmai", "Būsena"], m => [
+        `<span class="num">${esc(m.held_at.replace("T", " ").slice(0, 16))}</span>`, `<a href="#/m/${m.id}">${esc(m.title)}</a>`, esc(m.chair_name || "—"),
+        `${m.actions_closed} iš ${m.actions_total} uždaryta`, pill(m.status === "patvirtintas" ? "baigta" : "laukia", m.status_label)])}`,
+    gamyba: () => `<div class="card"><h2>Mazgai ir maršrutai</h2>
     ${p.assemblies.map(a => {
       const ts = p.tasks.filter(t => t.assembly_id === a.id);
       return `<div><h3><span class="mono">${esc(a.code)}</span> ${esc(a.name)} <span class="muted">× ${a.qty}${a.requires ? ` · laukia mazgų ${esc(a.requires)}` : ""}</span></h3>
@@ -254,7 +271,7 @@ async function pageProject(pid) {
       </tbody></table></div>
       ${edt ? `<form class="inline newt" data-a="${a.id}" style="margin-top:8px">
         <label>Seka<input name="seq" type="number" style="width:70px" placeholder="auto" id="nt-q-${a.id}"></label>
-        <label>Centras<select name="centre_id" required id="nt-c-${a.id}">${opt(centres.map(c => ({ id: c.id, name: `${c.code} ${c.name}` })))}</select></label>
+        <label>Centras<select name="centre_id" required id="nt-c-${a.id}">${byArea(centres).map(g => `<optgroup label="${esc(g.name)}">${g.items.map(c => `<option value="${c.id}">${esc(c.code)} ${esc(c.name)}</option>`).join("")}</optgroup>`).join("")}</select></label>
         <label>Operacija<input name="name" required id="nt-n-${a.id}"></label>
         <label>Kiekis<input name="qty_plan" type="number" min="1" value="${a.qty}" style="width:70px" id="nt-k-${a.id}"></label>
         <label>Norma min/vnt<input name="norm_min" type="number" step="0.1" style="width:90px" id="nt-m-${a.id}"></label>
@@ -264,13 +281,25 @@ async function pageProject(pid) {
     ${ed ? `<form id="newa" class="inline"><label>Mazgo kodas<input name="code" required id="na-code"></label><label>Pavadinimas<input name="name" required id="na-name"></label>
       <label>Kiekis<input name="qty" type="number" min="1" value="1" style="width:70px" id="na-qty"></label>
       <label>Laukia mazgų<input name="requires" placeholder="100,200" style="width:110px" id="na-req"></label><button class="ghost">Pridėti mazgą</button></form>` : ""}
-  </div>
-  <div class="card"><div class="row between"><h2>Komponentai</h2><a href="#/komponentai/${p.id}">Visi projekto pirkimai →</a></div>
+  </div>`,
+    komponentai: () => `<div class="card"><div class="row between"><h2>Komponentai</h2><a href="#/komponentai/${p.id}">Valdyti pirkimus →</a></div>
     ${compSummaryLine(p.components_summary)}
-    ${p.components.length ? compTable(p.components, { compact: true }) : `<p class="muted">Pirkimo eilučių dar nėra.</p>`}</div>
-  <div class="card"><h2>Neatitiktys</h2>${ncrTable(p.ncr, false)}</div>`;
+    ${p.components.length ? compTable(p.components, { compact: true }) : `<p class="muted">Pirkimo eilučių dar nėra.</p>`}</div>`,
+    neatitiktys: () => `<div class="card"><h2>Neatitiktys</h2>${ncrTable(p.ncr, false)}</div>`,
+  };
 
-  const reload = () => pageProject(pid);
+  app().innerHTML = `
+  <div class="row between"><div><a href="#/">← Krepšelis</a><h1><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</h1>
+    <p class="muted">${esc(p.customer)} · terminas ${esc(p.due_date || "—")} · vadovas ${esc(p.manager_name || "—")}</p></div>
+    <div class="row">${healthBadge(h)} ${pill(p.status, p.status_label)}</div></div>
+  <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${k === tab ? "on" : ""}">${l}${
+    k === "uzduotys" && h.dimensions[1].metrics.actions_overdue ? ` <span class="cnt bad">${h.dimensions[1].metrics.actions_overdue}</span>` :
+    k === "neatitiktys" && p.ncr_open ? ` <span class="cnt bad">${p.ncr_open}</span>` : ""}</a>`).join("")}</nav>
+  ${(body[tab] || body.sveikata)()}`;
+
+  const reload = () => pageProject(pid, tab);
+  if (tab === "uzduotys") { renderBoard($("#board"), extra.actions, { onChange: reload }); wireActionForm(p, reload); }
+  if (tab === "sveikata") $$("[data-act]").forEach(el => el.onclick = () => actionModal(+el.dataset.act, reload));
   const pe = $("#pedit");
   if (pe) pe.onsubmit = async e => {
     e.preventDefault(); const d = formData(pe);
@@ -299,6 +328,222 @@ async function pageProject(pid) {
     await act(() => POST("/api/tasks", d), "Operacija pridėta"); reload();
   });
   $$("[data-del]").forEach(b => b.onclick = async () => { await act(() => api("DELETE", `/api/tasks/${b.dataset.del}`), "Pašalinta"); reload(); });
+  if (tab === "sveikata") S.timers.push(setInterval(() => { if ($("#modal").hidden && location.hash.startsWith(`#/p/${pid}`)) reload(); }, 30000));
+}
+
+const addDays = (d, n) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const LEVEL_CLS = { green: "h-green", yellow: "h-yellow", red: "h-red" };
+const healthBadge = h => `<span class="hbadge ${LEVEL_CLS[h.level]}" title="Sveikatos balas ${h.score}/100">● ${esc(h.level_label)} · ${h.score}</span>`;
+const dot = (lvl, title) => `<i class="hdot ${LEVEL_CLS[lvl]}" title="${esc(title || "")}"></i>`;
+
+function healthView(h, p, soon) {
+  const m = k => h.dimensions.find(d => d.key === k).metrics;
+  const sch = m("schedule"), ex = m("execution"), co = m("components"), q = m("quality");
+  const pct = v => v == null ? "—" : `${Math.round(100 * v)}%`;
+  const keyfig = {
+    schedule: `Prognozė <b class="nw">${esc(sch.forecast_end || "—")}</b> · terminas <b class="nw">${esc(sch.due_date || "—")}</b><br>Etapų baigta ${sch.phases_done}/${sch.phases}${sch.slip_days ? ` · atsilikimas ${sch.slip_days} d.` : ""}`,
+    execution: `Užduočių atvirų ${ex.actions_open}, vėluoja <b>${ex.actions_overdue}</b>, laukia ${ex.actions_waiting}<br>Gamyba: atlikta <b>${pct(ex.progress_actual)}</b>, planas ~${pct(ex.progress_expected)}${ex.norm_ratio ? ` · faktas/norma ${ex.norm_ratio}` : ""}`,
+    components: `Gauta <b>${co.received_pct}%</b> iš ${co.lines} eil.<br>Vėluoja ${co.late}, rizika ${co.risk}, neužsakyta ${co.not_ordered}`,
+    quality: `Atvirų neatitikčių <b>${q.ncr_open}</b><br>Brokas ${q.scrap} vnt.${q.scrap ? ` (${(100 * q.scrap_share).toFixed(1)}%)` : ""}`,
+  };
+  return `<div class="hsum ${LEVEL_CLS[h.level]}">
+      <div><div class="muted">Projekto sveikata</div><div class="hbig">${esc(h.level_label)}</div><div class="muted">balas ${h.score}/100 · atnaujinta ${new Date(h.updated).toLocaleTimeString("lt-LT")}</div></div>
+      <p>Bendras lygis – blogiausia sritis, kad viena kritiška problema nepasislėptų už gerų. Balas – svertinis vidurkis: terminai 35 %, užduotys ir gamyba 25 %, komponentai 25 %, kokybė 15 %.</p></div>
+    <div class="hgrid">${h.dimensions.map(d => `<div class="hcard ${LEVEL_CLS[d.level]}">
+      <div class="row between"><h3>${esc(d.label)}</h3><span class="hbadge ${LEVEL_CLS[d.level]}">${esc(d.level_label)}</span></div>
+      <div class="hhead">${esc(d.headline)}</div>
+      <div class="hfig">${keyfig[d.key]}</div>
+      ${d.reasons.length ? `<ul class="hreasons">${d.reasons.map(r => `<li>${dot(r.level)}${esc(r.text)}</li>`).join("")}</ul>` : `<p class="muted">Nukrypimų nėra.</p>`}
+    </div>`).join("")}</div>
+    <div class="card"><h2>Artimiausių 7 dienų užduotys</h2>${soon.length ? soon.map(x => `<div class="soon" data-act="${x.id}">
+      ${pill(actCls(x), x.status_label)} <b>${esc(x.title)}</b> <span class="muted">· ${esc(x.owner_name || "nepriskirta")} · iki ${esc(x.due_date)}</span>${x.overdue ? ' <span class="s-late">vėluoja</span>' : ""}</div>`).join("") : `<p class="muted">Nėra.</p>`}</div>`;
+}
+
+// ---------- projekto komandos užduotys ----------
+const actCls = x => ({ nauja: "laukia", vykdoma: "gali", laukia: "pristabdyta", perziura: "vykdomas", atlikta: "baigta", atsaukta: "tuscia" }[x.status] || x.status);
+const PRIO = { 1: "▲ aukštas", 2: "", 3: "▽ žemas" };
+
+function renderBoard(el, list, o = {}) {
+  let showCancelled = false;
+  const draw = () => {
+    const cols = S.meta.action_statuses.filter(s => showCancelled || s.key !== "atsaukta");
+    el.innerHTML = `<div class="row between"><span class="muted">${list.filter(x => ["nauja", "vykdoma", "laukia", "perziura"].includes(x.status)).length} atvirų · ${list.filter(x => x.overdue).length} vėluoja</span>
+      <label class="row" style="display:flex"><input type="checkbox" id="b-cx" ${showCancelled ? "checked" : ""}> rodyti atšauktas</label></div>
+      <div class="board">${cols.map(c => {
+        const items = list.filter(x => x.status === c.key);
+        return `<div class="col"><div class="colh">${esc(c.label)} <span class="muted">${items.length}</span></div>${items.map(x => `
+          <div class="acard ${x.overdue ? "late" : ""}" data-act="${x.id}" tabindex="0">
+            <b>${esc(x.title)}</b>
+            ${o.global ? `<div class="muted mono">${esc(x.project_code)}</div>` : ""}
+            <div class="muted">${esc(x.owner_name || "nepriskirta")}${x.due_date ? ` · iki <span class="nw ${x.overdue ? "s-late" : ""}">${esc(x.due_date)}</span>` : ""}</div>
+            ${x.status === "laukia" && x.wait_reason ? `<div class="warn">⏸ ${esc(x.wait_reason)}</div>` : ""}
+            <div class="row" style="gap:6px">${PRIO[x.priority] ? `<span class="prio p${x.priority}">${PRIO[x.priority]}</span>` : ""}${x.meeting_id ? `<span class="muted">📋 susitikimas</span>` : ""}</div>
+          </div>`).join("") || `<div class="muted empty">—</div>`}</div>`;
+      }).join("")}</div>`;
+    $("#b-cx", el).onchange = e => { showCancelled = e.target.checked; draw(); };
+    $$("[data-act]", el).forEach(c => { c.onclick = () => actionModal(+c.dataset.act, o.onChange); c.onkeydown = e => e.key === "Enter" && c.onclick(); });
+  };
+  draw();
+}
+
+function actionForm(p, users) {
+  if (!can("actions")) return `<p class="muted">Naujas užduotis kuria projekto vadovas ir komanda.</p>`;
+  return `<form id="newact" class="inline"><label style="flex:1 1 260px">Nauja užduotis<input name="title" required placeholder="Ką reikia padaryti" id="na-title"></label>
+    <label>Atsakingas<select name="owner_id" id="na-owner">${opt(users, S.me.id, "—")}</select></label>
+    <label>Terminas<input type="date" name="due_date" id="na-due"></label>
+    <label>Prioritetas<select name="priority" id="na-prio">${opt(S.meta.priorities, 2)}</select></label>
+    <label>Mazgas<select name="assembly_id" id="na-asm">${opt(p.assemblies.map(a => ({ id: a.id, name: `${a.code} ${a.name}` })), "", "—")}</select></label>
+    <button>Sukurti</button></form>`;
+}
+function wireActionForm(p, after) {
+  const f = $("#newact"); if (!f) return;
+  f.onsubmit = async e => {
+    e.preventDefault(); const d = formData(f);
+    d.project_id = p.id; d.owner_id = d.owner_id ? +d.owner_id : null; d.priority = +d.priority; d.assembly_id = d.assembly_id ? +d.assembly_id : null; d.due_date = d.due_date || null;
+    await act(() => POST("/api/actions", d), "Užduotis sukurta"); after();
+  };
+}
+
+async function actionModal(id, after) {
+  const [x, users] = await Promise.all([GET(`/api/actions/${id}`), can("view") ? GET("/api/users") : []]);
+  const ed = x.can_edit, full = can("actions");
+  modal(`<div class="row between"><span class="muted mono">${esc(x.project_code)}${x.assembly_code ? " · " + esc(x.assembly_code) : ""}</span>${pill(actCls(x), x.status_label)}</div>
+    ${full ? `<input id="ax-title" value="${esc(x.title)}" style="font-size:17px;font-weight:600">` : `<h2>${esc(x.title)}</h2>`}
+    ${x.meeting_id ? `<div class="muted">Kilo iš susitikimo: <a href="#/m/${x.meeting_id}">${esc(x.meeting_title)}</a></div>` : ""}
+    <div class="grid2" style="gap:10px">
+      <label>Atsakingas${full ? `<select id="ax-owner">${opt(users.filter(u => u.active), x.owner_id, "—")}</select>` : `<b>${esc(x.owner_name || "—")}</b>`}</label>
+      <label>Terminas${full ? `<input type="date" id="ax-due" value="${esc(x.due_date || "")}">` : `<b class="${x.overdue ? "s-late" : ""}">${esc(x.due_date || "—")}</b>`}</label>
+      <label>Prioritetas${full ? `<select id="ax-prio">${opt(S.meta.priorities, x.priority)}</select>` : `<b>${esc((S.meta.priorities.find(p => p.key === x.priority) || {}).label)}</b>`}</label>
+    </div>
+    <label>Aprašymas${full ? `<textarea id="ax-desc">${esc(x.description)}</textarea>` : `<div>${esc(x.description || "—")}</div>`}</label>
+    ${full ? `<div><button class="ghost" id="ax-save">Įrašyti pakeitimus</button></div>` : ""}
+    ${x.status === "laukia" ? `<div class="warn">⏸ Laukia: ${esc(x.wait_reason)}</div>` : ""}
+    ${ed && x.next.length ? `<div class="card" style="gap:8px"><b>Keisti statusą</b>
+      <input id="ax-reason" placeholder="Priežastis (būtina laukiant ar atšaukiant)">
+      <div class="row">${x.next.map(n => `<button class="${n.key === "atsaukta" ? "ghost" : ""}" data-st="${n.key}">→ ${esc(n.label)}</button>`).join("")}</div></div>` : ""}
+    <div><b>Istorija</b><div class="hist">${x.history.map(hh => `<div><span class="muted num">${dt(hh.at)}</span> ${esc(hh.user_name || "")}:
+      ${hh.kind === "status" ? (hh.from_status ? `${esc(hh.from_label)} → <b>${esc(hh.to_label)}</b>` : `<b>${esc(hh.to_label)}</b>`) + (hh.text ? ` – ${esc(hh.text)}` : "")
+        : hh.kind === "edit" ? `<span class="muted">pakeista: ${esc(hh.text)}</span>` : `💬 ${esc(hh.text)}`}</div>`).join("")}</div></div>
+    <div class="row"><input id="ax-com" placeholder="Komentaras" style="flex:1"><button class="ghost" id="ax-cbtn">Komentuoti</button></div>
+    <div><button class="ghost" id="ax-x">Uždaryti</button></div>`, () => {
+    const done = () => { closeModal(); after && after(); };
+    $("#ax-x").onclick = done;
+    $$("[data-st]").forEach(b => b.onclick = async () => {
+      await act(() => POST(`/api/actions/${id}/status`, { status: b.dataset.st, reason: $("#ax-reason").value }), "Statusas pakeistas");
+      actionModal(id, after);
+    });
+    $("#ax-cbtn").onclick = async () => { await act(() => POST(`/api/actions/${id}/comment`, { text: $("#ax-com").value })); actionModal(id, after); };
+    const sv = $("#ax-save");
+    if (sv) sv.onclick = async () => {
+      await act(() => PUT(`/api/actions/${id}`, { title: $("#ax-title").value, owner_id: $("#ax-owner").value ? +$("#ax-owner").value : null,
+        due_date: $("#ax-due").value || null, priority: +$("#ax-prio").value, description: $("#ax-desc").value }), "Įrašyta");
+      actionModal(id, after);
+    };
+  });
+}
+
+async function pageMyActions() {
+  const mine = (sessionStorage.getItem("pf.mine") ?? "1") === "1" || !can("view");
+  const list = await GET(`/api/actions?${mine ? "owner=me&" : ""}status=`);
+  app().innerHTML = `<div class="row between"><h1>${mine ? "Mano užduotys" : "Visos projektų užduotys"}</h1>
+    ${can("view") ? `<div class="chips"><button class="${mine ? "" : "ghost"}" data-mine="1">Mano</button><button class="${mine ? "ghost" : ""}" data-mine="0">Visų projektų</button></div>` : ""}</div>
+    <div id="board"></div>`;
+  renderBoard($("#board"), list, { global: true, onChange: pageMyActions });
+  $$("[data-mine]").forEach(b => b.onclick = () => { sessionStorage.setItem("pf.mine", b.dataset.mine); pageMyActions(); });
+}
+
+// ---------- susitikimų protokolai ----------
+async function pageMeeting(id) {
+  const m = await GET(`/api/meetings/${id}`);
+  const draft = m.status === "juodrastis";
+  app().innerHTML = `<div class="row between noprint"><a href="#/p/${m.project_id}/susitikimai">← ${esc(m.project_code)} susitikimai</a>
+    <div class="row">${draft && can("meetings") ? `<a class="btn ghost" href="#/m/${m.id}/keisti">Redaguoti</a><button id="m-appr">Patvirtinti protokolą</button>` : ""}
+      <button class="ghost" id="m-copy">Kopijuoti tekstą</button><button class="ghost" id="m-print">Spausdinti</button></div></div>
+  <article class="card mom">
+    <div class="row between"><div><div class="muted mono">${esc(m.project_code)} ${esc(m.project_name)}</div><h1>${esc(m.title)}</h1></div>${pill(draft ? "laukia" : "baigta", m.status_label)}</div>
+    <div class="momgrid"><div><span class="muted">Data</span><b>${esc(m.held_at.replace("T", " ").slice(0, 16))}</b></div>
+      <div><span class="muted">Vieta</span><b>${esc(m.location || "—")}</b></div>
+      <div><span class="muted">Pirmininkas</span><b>${esc(m.chair_name || "—")}</b></div>
+      <div><span class="muted">Dalyviai</span><b>${esc([...m.attendee_names, ...(m.guests ? [m.guests] : [])].join(", ") || "—")}</b></div></div>
+    ${m.review.length ? `<section><h2>Ankstesnių susitikimų veiksmai</h2>${actTable(m.review, true)}</section>` : ""}
+    ${m.agenda ? `<section><h2>Darbotvarkė</h2><pre class="txt">${esc(m.agenda)}</pre></section>` : ""}
+    ${m.notes ? `<section><h2>Aptarta</h2><pre class="txt">${esc(m.notes)}</pre></section>` : ""}
+    <section><h2>Sprendimai</h2>${m.decision_list.length ? `<ol>${m.decision_list.map(d => `<li>${esc(d)}</li>`).join("")}</ol>` : `<p class="muted">Sprendimų neužrašyta.</p>`}</section>
+    <section><h2>Veiksmai</h2>${m.actions.length ? actTable(m.actions) : `<p class="muted">Veiksmų nėra.</p>`}</section>
+    ${m.approved_at ? `<p class="muted">Patvirtino ${esc(m.approved_name)} ${dt(m.approved_at)}</p>` : ""}
+  </article>`;
+  $$("[data-act]").forEach(el => el.onclick = () => actionModal(+el.dataset.act, () => pageMeeting(id)));
+  const ap = $("#m-appr"); if (ap) ap.onclick = async () => { await act(() => POST(`/api/meetings/${id}/approve`), "Protokolas patvirtintas"); pageMeeting(id); };
+  $("#m-print").onclick = () => window.print();
+  $("#m-copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(m.text); toast("Nukopijuota"); }
+    catch { modal(`<h2>Protokolo tekstas</h2><textarea style="min-height:300px">${esc(m.text)}</textarea><button class="ghost" onclick="closeModal()">Uždaryti</button>`); }
+  };
+}
+function actTable(list, withMeeting) {
+  return `<div class="tbl"><table><thead><tr><th>Veiksmas</th><th>Atsakingas</th><th>Terminas</th>${withMeeting ? "<th>Iš susitikimo</th>" : ""}<th>Būsena</th></tr></thead><tbody>
+    ${list.map(x => `<tr class="click" data-act="${x.id}"><td>${esc(x.title)}</td><td>${esc(x.owner_name || "—")}</td>
+      <td class="num ${x.overdue ? "s-late" : ""}">${esc(x.due_date || "—")}${x.overdue ? " ⚠" : ""}</td>
+      ${withMeeting ? `<td class="muted">${esc((x.meeting_at || "").slice(0, 10))} ${esc(x.meeting_title || "")}</td>` : ""}
+      <td>${pill(actCls(x), x.status_label)}${x.status === "laukia" ? `<div class="warn">${esc(x.wait_reason)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+async function pageMeetingEdit(a, b) {
+  // #/m/naujas/<projektas> arba #/m/<id>/keisti
+  const isNew = a === "naujas";
+  const m = isNew ? { project_id: +b, title: "", held_at: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16),
+    location: "", chair_id: S.me.id, attendees: [S.me.id], guests: "", agenda: "", notes: "", decisions: "", actions: [] } : await GET(`/api/meetings/${a}`);
+  const [users, p, open] = await Promise.all([GET("/api/users"), GET(`/api/projects/${m.project_id}`), GET(`/api/actions?project_id=${m.project_id}&status=open`)]);
+  const active = users.filter(u => u.active);
+  const review = open.filter(x => x.meeting_id && x.meeting_id !== m.id);
+  app().innerHTML = `<a href="#/p/${p.id}/susitikimai">← ${esc(p.code)} susitikimai</a>
+  <h1>${isNew ? "Naujas susitikimo protokolas" : "Redaguoti protokolą"}</h1>
+  <form id="mf" class="card" style="gap:12px">
+    <div class="grid2" style="gap:10px">
+      <label>Pavadinimas<input name="title" required value="${esc(m.title)}" placeholder="Savaitinis projekto susitikimas" id="mf-title"></label>
+      <label>Data ir laikas<input type="datetime-local" name="held_at" required value="${esc((m.held_at || "").slice(0, 16))}" id="mf-at"></label>
+      <label>Vieta<input name="location" value="${esc(m.location)}" id="mf-loc"></label>
+      <label>Pirmininkas<select name="chair_id" id="mf-chair">${opt(active, m.chair_id, "—")}</select></label>
+    </div>
+    <fieldset><legend>Dalyviai</legend><div class="checks">${active.map(u => `<label class="chk"><input type="checkbox" name="att" value="${u.id}" ${m.attendees.includes(u.id) ? "checked" : ""} id="mf-u-${u.id}"> ${esc(u.name)} <span class="muted">${esc(u.role_label)}</span></label>`).join("")}</div>
+      <label>Kiti dalyviai (užsakovas, tiekėjai)<input name="guests" value="${esc(m.guests)}" id="mf-guests"></label></fieldset>
+    ${review.length ? `<fieldset><legend>Ankstesnių susitikimų veiksmai – peržiūrėkite susitikimo pradžioje</legend>${actTable(review, true)}</fieldset>` : ""}
+    <label>Darbotvarkė<textarea name="agenda" id="mf-agenda">${esc(m.agenda)}</textarea></label>
+    <label>Aptarta<textarea name="notes" style="min-height:110px" id="mf-notes">${esc(m.notes)}</textarea></label>
+    <label>Sprendimai (po vieną eilutėje)<textarea name="decisions" id="mf-dec">${esc(m.decisions)}</textarea></label>
+    <fieldset><legend>Veiksmai – kiekvienas taps projekto užduotimi</legend>
+      ${m.actions.length ? `<div class="muted">Jau užregistruoti: ${m.actions.map(x => esc(x.title)).join("; ")}</div>` : ""}
+      <div id="rows"></div><button type="button" class="ghost" id="addrow">+ Veiksmas</button></fieldset>
+    <div class="row"><button>${isNew ? "Sukurti protokolą" : "Įrašyti"}</button><a class="btn ghost" href="#/p/${p.id}/susitikimai">Atšaukti</a></div>
+  </form>`;
+  let n = 0;
+  const addRow = () => {
+    const i = n++;
+    const d = document.createElement("div");
+    d.className = "inline actrow";
+    d.innerHTML = `<label style="flex:1 1 240px">Veiksmas<input data-r="title" id="ar-t-${i}"></label>
+      <label>Atsakingas<select data-r="owner_id" id="ar-o-${i}">${opt(active, "", "—")}</select></label>
+      <label>Terminas<input type="date" data-r="due_date" id="ar-d-${i}"></label>
+      <label>Prioritetas<select data-r="priority" id="ar-p-${i}">${opt(S.meta.priorities, 2)}</select></label>`;
+    $("#rows").appendChild(d);
+  };
+  addRow(); addRow();
+  $("#addrow").onclick = addRow;
+  $$("[data-act]").forEach(el => el.onclick = () => actionModal(+el.dataset.act, () => {}));
+  $("#mf").onsubmit = async e => {
+    e.preventDefault();
+    const d = formData(e.target);
+    delete d.att;
+    d.project_id = p.id;
+    d.chair_id = d.chair_id ? +d.chair_id : null;
+    d.attendees = $$("input[name=att]:checked").map(x => +x.value);
+    d.new_actions = $$(".actrow").map(r => ({
+      title: $("[data-r=title]", r).value, owner_id: $("[data-r=owner_id]", r).value ? +$("[data-r=owner_id]", r).value : null,
+      due_date: $("[data-r=due_date]", r).value || null, priority: +$("[data-r=priority]", r).value,
+    })).filter(x => x.title.trim());
+    const r = await act(() => isNew ? POST("/api/meetings", d) : PUT(`/api/meetings/${m.id}`, d), "Protokolas įrašytas");
+    location.hash = `#/m/${isNew ? r.id : m.id}`;
+  };
 }
 
 function phaseBtns(ph) {

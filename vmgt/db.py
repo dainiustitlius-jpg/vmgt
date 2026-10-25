@@ -241,6 +241,59 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX ix_users_pin ON users (pin_hash);
     """,
+    # 5 – projekto valdymas: komandos užduotys, jų istorija, susitikimų protokolai
+    """
+    CREATE TABLE meetings (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        title TEXT NOT NULL,
+        held_at TEXT NOT NULL,                 -- data ir laikas
+        location TEXT NOT NULL DEFAULT '',
+        chair_id INTEGER REFERENCES users(id),
+        attendees TEXT NOT NULL DEFAULT '[]',  -- JSON: vartotojų id
+        guests TEXT NOT NULL DEFAULT '',       -- ne sistemos dalyviai (užsakovas, tiekėjas)
+        agenda TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        decisions TEXT NOT NULL DEFAULT '',    -- po vieną sprendimą eilutėje
+        status TEXT NOT NULL DEFAULT 'juodrastis',
+        created_by INTEGER REFERENCES users(id),
+        created TEXT NOT NULL,
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TEXT
+    );
+    CREATE TABLE actions (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        assembly_id INTEGER REFERENCES assemblies(id),
+        phase_id INTEGER REFERENCES phases(id),
+        meeting_id INTEGER REFERENCES meetings(id),   -- iš kurio susitikimo kilo
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        owner_id INTEGER REFERENCES users(id),
+        priority INTEGER NOT NULL DEFAULT 2,           -- 1 aukštas, 2 vidutinis, 3 žemas
+        status TEXT NOT NULL DEFAULT 'nauja',
+        due_date TEXT,
+        wait_reason TEXT NOT NULL DEFAULT '',
+        created_by INTEGER REFERENCES users(id),
+        created TEXT NOT NULL,
+        updated TEXT NOT NULL,
+        started_at TEXT,
+        done_at TEXT
+    );
+    CREATE INDEX ix_actions_project ON actions (project_id, status);
+    CREATE INDEX ix_actions_owner ON actions (owner_id, status);
+    -- komentarai ir kiekvienas būsenos pakeitimas: visa užduoties istorija
+    CREATE TABLE action_log (
+        id INTEGER PRIMARY KEY,
+        action_id INTEGER NOT NULL REFERENCES actions(id),
+        user_id INTEGER REFERENCES users(id),
+        at TEXT NOT NULL,
+        kind TEXT NOT NULL,                    -- comment / status / edit
+        from_status TEXT,
+        to_status TEXT,
+        text TEXT NOT NULL DEFAULT ''
+    );
+    """,
 ]
 
 

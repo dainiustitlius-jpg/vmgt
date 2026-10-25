@@ -66,10 +66,27 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
         return dep
 
     # ---------- prisijungimas ----------
+    # Nesėkmingų bandymų riba vienam adresui: be jos 4 skaitmenų PIN
+    # perrenkamas per kelias minutes. Laikoma atmintyje – perkrovus servisą
+    # skaičiavimas prasideda iš naujo, ir to užtenka.
+    failed: dict[str, list[float]] = {}
+    LIMIT, WINDOW = 8, 300
 
     @app.post("/api/login")
-    def login(body: dict, response: Response, con=Depends(get_con)):
-        token, u = auth.login(con, cfg.session_hours, body.get("login"), body.get("password"), body.get("pin"))
+    def login(body: dict, request: Request, response: Response, con=Depends(get_con)):
+        import time
+
+        ip = request.client.host if request.client else "?"
+        now = time.monotonic()
+        recent = [t for t in failed.get(ip, []) if now - t < WINDOW]
+        if len(recent) >= LIMIT:
+            raise HTTPException(429, f"Per daug nesėkmingų bandymų. Palaukite {int(WINDOW - (now - recent[0])) // 60 + 1} min.")
+        try:
+            token, u = auth.login(con, cfg.session_hours, body.get("login"), body.get("password"), body.get("pin"))
+        except RuleError:
+            failed[ip] = recent + [now]
+            raise
+        failed.pop(ip, None)
         response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=cfg.session_hours * 3600)
         return auth.public_user(u)
 
@@ -171,7 +188,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.get("/api/centres")
     def centre_list(all: int = 0, user=Depends(get_user), con=Depends(get_con)):
         out = projects.list_centres(con, active_only=not all)
-        return [c for c in out if auth.can_centre(user, c["code"])] if not all else out
+        return [c for c in out if auth.can_centre(user, c["code"], c["area_code"])] if not all else out
 
     @app.post("/api/centres")
     def centre_new(body: dict, user=Depends(need("admin")), con=Depends(get_con)):
@@ -180,6 +197,19 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.put("/api/centres/{cid}")
     def centre_put(cid: int, body: dict, user=Depends(need("admin")), con=Depends(get_con)):
         projects.save_centre(con, user["id"], body, cid)
+        return {"ok": True}
+
+    @app.get("/api/areas")
+    def area_list(user=Depends(get_user), con=Depends(get_con)):
+        return projects.list_areas(con)
+
+    @app.post("/api/areas")
+    def area_new(body: dict, user=Depends(need("admin")), con=Depends(get_con)):
+        return {"id": projects.save_area(con, user["id"], body)}
+
+    @app.put("/api/areas/{aid}")
+    def area_put(aid: int, body: dict, user=Depends(need("admin")), con=Depends(get_con)):
+        projects.save_area(con, user["id"], body, aid)
         return {"ok": True}
 
     @app.get("/api/plan/{code}")
@@ -196,7 +226,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     def _centre_for(con, user, code):
         c = projects.centre_by_code(con, code)
-        if not auth.can_centre(user, code):
+        if not auth.can_centre(user, code, c["area_code"]):
             raise HTTPException(403, "Šis darbo centras jums nepriskirtas")
         return c
 
@@ -227,7 +257,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.get("/api/floor")
     def floor(user=Depends(need("view")), con=Depends(get_con)):
-        return {"now": db.now(), "centres": analytics.floor(con)}
+        return {"now": db.now(), "areas": projects.list_areas(con, active_only=True), "centres": analytics.floor(con)}
 
     @app.get("/api/analytics")
     def analytics_get(date_from: str | None = None, date_to: str | None = None,

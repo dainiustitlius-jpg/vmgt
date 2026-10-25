@@ -148,3 +148,13 @@ def test_terminalo_laikas_be_atviro_intervalo(con, plant, clock):
     c = dict(con.execute("SELECT * FROM work_centres WHERE code='LAZ'").fetchone())
     run = tasks.terminal_view(con, c)["running"]
     assert run["work_s"] == 20 * 60 and run["since"] == "2026-10-20T08:20:00+00:00"
+
+
+def test_senas_pbkdf2_pin_perrasomas_prisijungus(con, clock):
+    uid = auth.create_user(con, "x", "X", "operatorius", "slapt")
+    con.execute("UPDATE users SET pin_hash=? WHERE id=?", (auth.hash_secret("4321"), uid))
+    tok, u = auth.login(con, 1, pin="4321")
+    assert u["id"] == uid
+    assert con.execute("SELECT pin_hash FROM users WHERE id=?", (uid,)).fetchone()[0].startswith("pin$")
+    with pytest.raises(RuleError, match="jau naudojamas"):
+        auth.create_user(con, "y", "Y", "operatorius", "slapt", pin="4321")

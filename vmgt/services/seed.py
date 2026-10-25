@@ -21,26 +21,41 @@ USERS = [
     ("vadovas", "Rasa Vadovienė", "vadovas", None, []),
     ("planuotojas", "Tomas Planas", "planuotojas", None, []),
     ("technologas", "Ieva Technologė", "technologas", None, []),
-    ("meistras", "Andrius Meistras", "meistras", "9999", []),
+    ("meistras", "Andrius Meistras", "meistras", "9999", ["MAB", "TKB", "SVB"]),
+    ("meistras2", "Vytautas Meistras", "meistras", "8888", ["DZB", "ATB", "TIS"]),
     ("kokybe", "Laura Kokybė", "kokybe", None, []),
     ("pirkimai", "Eglė Pirkėja", "pirkimai", None, []),
     ("sandelis", "Paulius Sandėlis", "sandelis", "5555", []),
     ("op1", "Jonas Petraitis", "operatorius", "1111", []),
     ("op2", "Marius Kazlauskas", "operatorius", "2222", []),
-    ("op3", "Darius Suvirintojas", "operatorius", "3333", ["SV-01", "SV-02"]),
+    ("op3", "Darius Suvirintojas", "operatorius", "3333", ["SVB"]),
 ]
 
-CENTRES = [
-    ("LAZ-01", "Lazeris", "pjovimas", 0),
-    ("PLZ-01", "Plazma", "pjovimas", 0),
-    ("LNK-01", "Lenkimo presas", "lenkimas", 0),
-    ("MECH-01", "Frezavimas, tekinimas", "mechaninis", 0),
-    ("SV-01", "Suvirinimas 1", "suvirinimas", 1),
-    ("SV-02", "Suvirinimas 2", "suvirinimas", 1),
-    ("DAZ-01", "Dažymas", "dazymas", 1),
-    ("SUR-01", "Mechaninis surinkimas", "surinkimas", 1),
-    ("EL-01", "Elektros surinkimas", "elektra", 1),
-    ("TST-01", "Testavimas", "testavimas", 1),
+# Gamybos barai ir jų darbo centrai (vartotojo aprašymas 2026-10-25). Stočių
+# pavadinimai – pavyzdiniai, tikrus įveda administratorius.
+AREAS = [
+    ("MAB", "Mechaninio apdirbimo baras", "meistras", [
+        ("PJV-01", "Juostinis pjūklas", "pjovimas", 0),
+        ("LAZ-01", "Lazeris", "pjovimas", 0),
+        ("PLZ-01", "Plazma", "pjovimas", 0),
+        ("LNK-01", "Lenkimo presas", "lenkimas", 0)]),
+    ("TKB", "Tekinimo baras", "meistras", [
+        ("TEK-01", "Universalios tekinimo staklės 1", "tekinimas", 0),
+        ("TEK-02", "Universalios tekinimo staklės 2", "tekinimas", 0),
+        ("CNC-01", "CNC tekinimo staklės", "tekinimas", 0),
+        ("MECH-01", "CNC frezavimo centras", "mechaninis", 0)]),
+    ("SVB", "Suvirinimo baras", "meistras", [
+        (f"SV-{i:02d}", f"Surinkimo ir suvirinimo stotis {i}", "suvirinimas", 1) for i in range(1, 11)]),
+    ("DZB", "Dažymo baras", "meistras2", [
+        ("SML-01", "Smėliavimas", "pavirsius", 1),
+        ("DAZ-01", "Šlapias dažymas", "dazymas", 1),
+        ("DAZ-02", "Miltelinis dažymas", "dazymas", 1)]),
+    ("ATB", "Automatikos baras", "meistras2", [
+        ("EL-01", "Elektros spintų surinkimas", "elektra", 1),
+        ("PRG-01", "Programavimas ir derinimas", "programavimas", 1)]),
+    ("TIS", "Technologinių įrenginių surinkimo baras", "meistras2", [
+        ("SUR-01", "Mechaninis surinkimas", "surinkimas", 1),
+        ("TST-01", "Testavimas", "testavimas", 1)]),
 ]
 
 
@@ -64,8 +79,11 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         for login, name, role, pin, centres in USERS:
             uid[login] = auth.create_user(con, login, name, role, TEST_PASSWORD, pin=pin, centres=centres)
         cid = {}
-        for code, name, kind, manual in CENTRES:
-            cid[code] = projects.save_centre(con, None, {"code": code, "name": name, "kind": kind, "manual": manual})
+        for acode, aname, master, centres in AREAS:
+            aid = projects.save_area(con, None, {"code": acode, "name": aname, "master_id": uid[master]})
+            for code, name, kind, manual in centres:
+                cid[code] = projects.save_centre(con, None, {"code": code, "name": name, "kind": kind,
+                                                             "manual": manual, "area_id": aid})
         admin = {"id": uid["admin"], "centres": "[]"}
 
         # brėžiniai: 1023-100 turi dvi revizijas – dažymo užduotis sukurta su A
@@ -116,15 +134,17 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         r10 = task(p1, a1["100"], "LAZ-01", 10, "Lakštų detalių pjovimas", 1, 45, "1023-100", "A")
         r20 = task(p1, a1["100"], "LNK-01", 20, "Lenkimas", 1, 60, "1023-100", "A")
         r30 = task(p1, a1["100"], "SV-01", 30, "Rėmo suvirinimas", 1, 240, "1023-100", "A")
+        task(p1, a1["100"], "SML-01", 35, "Smėliavimas Sa 2,5", 1, 40, "1023-100", "A")
         task(p1, a1["100"], "DAZ-01", 40, "Dažymas RAL 7035", 1, 90, "1023-100", "A")
         k10 = task(p1, a1["200"], "LAZ-01", 10, "Šoninių plokščių pjovimas", 2, 20, "1023-200", "C")
         k20 = task(p1, a1["200"], "LNK-01", 20, "Šonų lenkimas", 2, 25, "1023-200", "C")
-        task(p1, a1["200"], "MECH-01", 30, "Velenų tekinimas", 4, 35, "1023-200", "C")
+        task(p1, a1["200"], "CNC-01", 30, "Velenų tekinimas", 4, 35, "1023-200", "C")
         task(p1, a1["200"], "SV-02", 40, "Konvejerio rėmo suvirinimas", 2, 150, "1023-200", "C")
-        task(p1, a1["200"], "DAZ-01", 50, "Dažymas RAL 5010", 2, 60, "1023-200", "C")
+        task(p1, a1["200"], "DAZ-02", 50, "Miltelinis dažymas RAL 5010", 2, 60, "1023-200", "C")
         task(p1, a1["300"], "EL-01", 10, "Spintos montavimas", 1, 480)
         task(p1, a1["900"], "SUR-01", 10, "Linijos mechaninis surinkimas", 1, 960, "1023-900", "A")
         task(p1, a1["900"], "EL-01", 20, "Elektros sujungimai", 1, 480, "1023-900", "A")
+        task(p1, a1["900"], "PRG-01", 25, "PLC ir robotų programų derinimas", 1, 600, "1023-900", "A")
         task(p1, a1["900"], "TST-01", 30, "Funkcinis testas, FAT", 1, 240, "1023-900", "A")
 
         # --- P-24121: dar neprasidėjęs gamyboje, eilė DAZ-01 nepatvirtinta ---

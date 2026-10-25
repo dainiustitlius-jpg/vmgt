@@ -30,9 +30,12 @@ CENTRE_KINDS = [
     ("lenkimas", "Lenkimas"),
     ("suvirinimas", "Suvirinimas"),
     ("mechaninis", "Mechaninis apdirbimas"),
+    ("tekinimas", "Tekinimas"),
+    ("pavirsius", "Paviršiaus paruošimas (smėliavimas)"),
     ("dazymas", "Dažymas"),
     ("surinkimas", "Surinkimas"),
     ("elektra", "Elektros surinkimas"),
+    ("programavimas", "Programavimas, derinimas"),
     ("testavimas", "Testavimas"),
     ("kita", "Kita"),
 ]
@@ -213,17 +216,56 @@ def set_phase_status(con, by, phase_id, status) -> None:
     db.log_event(con, by, "phase", phase_id, "status", {"status": status})
 
 
+# ---------- gamybos barai ----------
+# Baras – cecho dalis (mechaninis apdirbimas, suvirinimas, dažymas...), kuriai
+# priklauso keli darbo centrai ir kurią prižiūri meistras. Centras be baro
+# leidžiamas: rodomas grupėje „Be baro“, kad nieko nedingtų.
+
+def list_areas(con, active_only=False) -> list[dict]:
+    q = ("SELECT ar.*, u.name AS master_name, "
+         "(SELECT COUNT(*) FROM work_centres c WHERE c.area_id=ar.id AND c.active=1) AS centres "
+         "FROM areas ar LEFT JOIN users u ON u.id=ar.master_id")
+    if active_only:
+        q += " WHERE ar.active=1"
+    return db.rows(con.execute(q + " ORDER BY ar.sort, ar.code"))
+
+
+def save_area(con, by, data: dict, area_id=None) -> int:
+    if area_id is None:
+        if not data.get("code") or not data.get("name"):
+            raise RuleError("Reikia baro kodo ir pavadinimo")
+        if con.execute("SELECT 1 FROM areas WHERE code=?", (data["code"],)).fetchone():
+            raise RuleError(f"Baras {data['code']} jau yra")
+        if con.execute("SELECT 1 FROM work_centres WHERE code=?", (data["code"],)).fetchone():
+            # tas pats kodas priskiriant vartotojui reikštų ir centrą, ir barą
+            raise RuleError(f"Kodas {data['code']} jau naudojamas darbo centrui")
+        sort = con.execute("SELECT COALESCE(MAX(sort),0)+1 FROM areas").fetchone()[0]
+        cur = con.execute("INSERT INTO areas (code, name, master_id, sort) VALUES (?,?,?,?)",
+                          (data["code"], data["name"], data.get("master_id"), sort))
+        db.log_event(con, by, "area", cur.lastrowid, "create", data)
+        return cur.lastrowid
+    vals = {k: data[k] for k in ("name", "master_id", "active", "sort") if k in data}
+    if vals:
+        con.execute(f"UPDATE areas SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), area_id))
+        db.log_event(con, by, "area", area_id, "update", vals)
+    return area_id
+
+
 # ---------- darbo centrai ----------
 
+_CENTRE_SQL = ("SELECT c.*, ar.code AS area_code, ar.name AS area_name, COALESCE(ar.sort, 9999) AS area_sort "
+               "FROM work_centres c LEFT JOIN areas ar ON ar.id=c.area_id")
+
+
 def list_centres(con, active_only=True) -> list[dict]:
-    q = "SELECT * FROM work_centres"
+    q = _CENTRE_SQL
     if active_only:
-        q += " WHERE active=1"
-    return db.rows(con.execute(q + " ORDER BY sort, code"))
+        q += " WHERE c.active=1"
+    return db.rows(con.execute(q + " ORDER BY area_sort, c.sort, c.code"))
 
 
 def centre_by_code(con, code) -> dict:
-    c = db.row(con.execute("SELECT * FROM work_centres WHERE code=?", (code,)))
+    c = db.row(con.execute(_CENTRE_SQL + " WHERE c.code=?", (code,)))
     if not c:
         raise NotFound(f"Darbo centro {code} nėra")
     return c
@@ -235,14 +277,18 @@ def save_centre(con, by, data: dict, centre_id=None) -> int:
             raise RuleError("Reikia centro kodo ir pavadinimo")
         if con.execute("SELECT 1 FROM work_centres WHERE code=?", (data["code"],)).fetchone():
             raise RuleError(f"Centras {data['code']} jau yra")
+        if con.execute("SELECT 1 FROM areas WHERE code=?", (data["code"],)).fetchone():
+            raise RuleError(f"Kodas {data['code']} jau naudojamas barui")
         sort = con.execute("SELECT COALESCE(MAX(sort),0)+1 FROM work_centres").fetchone()[0]
         cur = con.execute(
-            "INSERT INTO work_centres (code, name, kind, manual, strict_order, sort) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO work_centres (code, name, kind, manual, strict_order, sort, area_id) VALUES (?,?,?,?,?,?,?)",
             (data["code"], data["name"], data.get("kind", "kita"), int(data.get("manual", 1)),
-             int(data.get("strict_order", 1)), sort))
+             int(data.get("strict_order", 1)), sort, data.get("area_id") or None))
         db.log_event(con, by, "centre", cur.lastrowid, "create", data)
         return cur.lastrowid
     vals = {k: data[k] for k in ("name", "kind", "manual", "strict_order", "active") if k in data}
+    if "area_id" in data:
+        vals["area_id"] = data["area_id"] or None
     if vals:
         con.execute(f"UPDATE work_centres SET {', '.join(k + '=?' for k in vals)} WHERE id=?",
                     (*vals.values(), centre_id))

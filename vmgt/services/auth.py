@@ -65,6 +65,24 @@ def check_secret(secret: str, stored: str | None) -> bool:
     return hmac.compare_digest(test.hex(), dk)
 
 
+def pin_key(con, pin: str) -> str:
+    """PIN raktas: HMAC-SHA256 su šios diegties paslaptimi.
+
+    Kodėl ne PBKDF2, kaip slaptažodžiams: PIN tikrinamas neturint
+    prisijungimo vardo, tad su lėta maiša tektų tikrinti VISUS vartotojus iš
+    eilės – 6 PIN užtrukdavo iki 0,9 s, 50 operatorių būtų ~7 s prie
+    terminalo. 4–8 skaitmenų PIN lėta maiša nuo perrinkimo vis tiek neapsaugo
+    (10^4 variantų); jį saugo bandymų riba web sluoksnyje (`web.app`).
+    """
+    r = con.execute("SELECT value FROM settings WHERE key='pin_secret'").fetchone()
+    if r:
+        secret = r[0]
+    else:
+        secret = secrets.token_hex(32)
+        con.execute("INSERT INTO settings (key, value) VALUES ('pin_secret', ?)", (secret,))
+    return "pin$" + hmac.new(bytes.fromhex(secret), pin.encode(), hashlib.sha256).hexdigest()
+
+
 def perms_of(user: dict) -> set[str]:
     return set(ROLES.get(user["role"], ("", set()))[1])
 
@@ -93,7 +111,7 @@ def create_user(con, login, name, role, password, pin=None, centres=None, by=Non
     try:
         cur = con.execute(
             "INSERT INTO users (login, name, role, pw_hash, pin_hash, centres, created) VALUES (?,?,?,?,?,?,?)",
-            (login, name, role, hash_secret(password), hash_secret(pin) if pin else None,
+            (login, name, role, hash_secret(password), pin_key(con, pin) if pin else None,
              json.dumps(centres or []), db.now()),
         )
     except Exception as e:  # sqlite3.IntegrityError – užimtas vardas
@@ -125,7 +143,7 @@ def update_user(con, user_id, by, **fields) -> None:
         else:
             if _pin_taken(con, fields["pin"], exclude=user_id):
                 raise RuleError("Toks PIN jau naudojamas")
-            sets.append("pin_hash=?"); vals.append(hash_secret(fields["pin"]))
+            sets.append("pin_hash=?"); vals.append(pin_key(con, fields["pin"]))
     if "active" in fields and fields["active"] is not None:
         if not fields["active"] and u["role"] == "admin" and _active_admins(con) <= 1:
             raise RuleError("Negalima išjungti paskutinio administratoriaus")
@@ -143,11 +161,22 @@ def _active_admins(con) -> int:
     return con.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1").fetchone()[0]
 
 
+def _pin_user(con, pin) -> dict | None:
+    u = db.row(con.execute("SELECT * FROM users WHERE pin_hash=? AND active=1", (pin_key(con, pin),)))
+    if u:
+        return u
+    # seni PBKDF2 PIN (iki 2026-10-25): tikrinami po vieną ir, radus,
+    # perrašomi nauju raktu – taip seni įrašai išnyksta patys
+    for r in db.rows(con.execute("SELECT * FROM users WHERE pin_hash LIKE 'pbkdf2$%' AND active=1")):
+        if check_secret(pin, r["pin_hash"]):
+            con.execute("UPDATE users SET pin_hash=? WHERE id=?", (pin_key(con, pin), r["id"]))
+            return r
+    return None
+
+
 def _pin_taken(con, pin, exclude=None) -> bool:
-    for r in con.execute("SELECT id, pin_hash FROM users WHERE pin_hash IS NOT NULL AND active=1"):
-        if r["id"] != exclude and check_secret(pin, r["pin_hash"]):
-            return True
-    return False
+    u = _pin_user(con, pin)
+    return bool(u and u["id"] != exclude)
 
 
 def login(con, hours: int, login_name=None, password=None, pin=None) -> tuple[str, dict]:
@@ -155,10 +184,7 @@ def login(con, hours: int, login_name=None, password=None, pin=None) -> tuple[st
     vartotojas egzistuoja."""
     user = None
     if pin:
-        for r in db.rows(con.execute("SELECT * FROM users WHERE pin_hash IS NOT NULL AND active=1")):
-            if check_secret(pin, r["pin_hash"]):
-                user = r
-                break
+        user = _pin_user(con, str(pin))
     elif login_name and password:
         r = db.row(con.execute("SELECT * FROM users WHERE login=? AND active=1", (login_name,)))
         if r and check_secret(password, r["pw_hash"]):
@@ -191,9 +217,12 @@ def user_by_token(con, token: str | None) -> dict | None:
     return r
 
 
-def can_centre(user: dict, centre_code: str) -> bool:
+def can_centre(user: dict, centre_code: str, area_code: str | None = None) -> bool:
+    """Vartotojui priskirti kodai gali būti centrų (SV-01) arba barų (SVB):
+    baro meistrui ar suvirintojui užtenka priskirti barą, ir nauji to baro
+    centrai jam atsiranda patys."""
     allowed = json.loads(user.get("centres") or "[]")
-    return not allowed or centre_code in allowed
+    return not allowed or centre_code in allowed or bool(area_code and area_code in allowed)
 
 
 def _th(token: str) -> str:

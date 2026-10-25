@@ -331,13 +331,35 @@ function gantt(phases, asmName) {
     <div class="legend">${legend}<span>Plona juosta – planas, stora – faktas, raudona linija – šiandien</span></div>`;
 }
 
+// ---------- gamybos barai ----------
+// Centrai grupuojami pagal barą tokia tvarka, kokią grąžina serveris
+// (barų eilė, centrų eilė bare); centras be baro – grupėje „Be baro“.
+function byArea(list, get = x => x) {
+  const groups = [];
+  for (const x of list) {
+    const c = get(x), k = c.area_code || "";
+    let g = groups.find(g => g.code === k);
+    if (!g) groups.push(g = { code: k, name: c.area_name || "Be baro", items: [] });
+    g.items.push(x);
+  }
+  return groups;
+}
+function centreOptions(centres, sel) {
+  return byArea(centres).map(g => `<optgroup label="${esc(g.name)}">${g.items.map(c =>
+    `<option value="${esc(c.code)}" ${c.code === sel ? "selected" : ""}>${esc(c.code)} ${esc(c.name)}</option>`).join("")}</optgroup>`).join("");
+}
+
 // ---------- cechas ----------
 async function pageFloor() {
   const draw = async () => {
     const r = await GET("/api/floor");
     const label = { dirba: "Dirba", pristabdyta: "Pristabdyta", gali: "Gali pradėti", laukia: "Laukia", tuscia: "Eilėje nėra" };
-    app().innerHTML = `<div class="row between"><h1>Cecho būsena</h1><span class="muted">atnaujinama kas 10 s</span></div>
-    <div class="floor">${r.centres.map(s => {
+    let sel = ""; try { sel = localStorage.getItem("pf.area") || ""; } catch {}
+    const groups = byArea(r.centres, s => s.centre);
+    if (sel && !groups.some(g => g.code === sel)) sel = "";
+    const masters = Object.fromEntries(r.areas.map(a => [a.code, a.master_name]));
+    const count = (items, st) => items.filter(s => s.state === st).length;
+    const card = s => {
       const t = s.task, n = s.next;
       const link = can("execute") ? `#/t/${s.centre.code}` : can("plan") ? `#/planas/${s.centre.code}` : "#/cechas";
       return `<a class="wc ${s.state}" href="${link}">
@@ -348,7 +370,17 @@ async function pageFloor() {
           <div class="muted">${esc(s.who || "")}${s.pause ? ` · ${esc(s.pause)}` : ""}</div>`
         : n ? `<div>Kitas: <b>${esc(n.project_code)} · ${esc(n.assembly_code)}</b> ${esc(n.name)}</div>${s.lock ? `<div class="lock">🔒 ${esc(s.lock)}</div>` : ""}` : ""}
         <div class="muted">Eilėje: ${s.queue}</div></a>`;
-    }).join("")}</div>`;
+    };
+    app().innerHTML = `<div class="row between"><h1>Cecho būsena</h1><span class="muted">atnaujinama kas 10 s</span></div>
+    <div class="chips"><button class="${sel ? "ghost" : ""}" data-area="">Visi barai</button>${groups.map(g =>
+      `<button class="${sel === g.code ? "" : "ghost"}" data-area="${esc(g.code)}">${esc(g.name)}</button>`).join("")}</div>
+    ${groups.filter(g => !sel || g.code === sel).map(g => `<section class="area">
+      <div class="row between area-h"><h2>${esc(g.name)}</h2>
+        <div class="row">${masters[g.code] ? `<span class="muted">Meistras: ${esc(masters[g.code])}</span>` : ""}
+          ${pill("dirba", `dirba ${count(g.items, "dirba")}`)} ${count(g.items, "pristabdyta") ? pill("pristabdyta", `pristabdyta ${count(g.items, "pristabdyta")}`) : ""}
+          ${pill("gali", `gali pradėti ${count(g.items, "gali")}`)} <span class="muted">${g.items.length} centr.</span></div></div>
+      <div class="floor">${g.items.map(card).join("")}</div></section>`).join("")}`;
+    $$("[data-area]").forEach(b => b.onclick = () => { try { localStorage.setItem("pf.area", b.dataset.area); } catch {} draw(); });
   };
   await draw();
   S.timers.push(setInterval(draw, 10000));
@@ -364,7 +396,7 @@ async function pagePlan(code) {
   const r = await GET(`/api/plan/${code}`);
   const unapproved = r.tasks.filter(t => !t.approved).length;
   app().innerHTML = `<div class="row between"><h1>Darbo centrų eilės</h1>
-    <select id="pc">${opt(centres.map(c => ({ key: c.code, label: `${c.code} ${c.name}` })), code)}</select></div>
+    <select id="pc">${centreOptions(centres, code)}</select></div>
   <div class="card"><div class="row between"><h2>${esc(r.centre.code)} ${esc(r.centre.name)}</h2>
     <button id="appr" ${unapproved ? "" : "disabled"}>Patvirtinti eilę${unapproved ? ` (${unapproved} naujos)` : ""}</button></div>
     <p class="muted">Terminalas rodo tik patvirtintas užduotis. ${r.centre.strict_order ? "Šiame centre griežta eilė: pradėti galima tik pirmą." : "Operatorius gali rinktis iš eilės."}</p>
@@ -389,8 +421,8 @@ async function pageTerminal(code) {
   if (!code) {
     const saved = localStorage.getItem("pf.term");
     if (saved && centres.some(c => c.code === saved)) { location.hash = `#/t/${saved}`; return; }
-    app().innerHTML = `<div class="tm"><h1>Pasirinkite darbo centrą</h1><div class="floor">${centres.map(c =>
-      `<a class="wc gali" href="#/t/${c.code}"><b class="mono">${esc(c.code)}</b><span>${esc(c.name)}</span></a>`).join("")}</div></div>`;
+    app().innerHTML = `<div class="tm"><h1>Pasirinkite darbo centrą</h1>${byArea(centres).map(g => `<h2>${esc(g.name)}</h2>
+      <div class="floor">${g.items.map(c => `<a class="wc gali" href="#/t/${c.code}"><b class="mono">${esc(c.code)}</b><span>${esc(c.name)}</span></a>`).join("")}</div>`).join("")}</div>`;
     return;
   }
   localStorage.setItem("pf.term", code);
@@ -547,8 +579,10 @@ async function pageAnalytics() {
     <div class="tile"><span class="muted">Neplanuotos pauzės</span><b>${hm(r.totals.pause_s)}</b></div>
     <div class="tile"><span class="muted">Užbaigta užduočių</span><b>${r.totals.tasks_done}</b></div>
     <div class="tile"><span class="muted">Brokas, vnt.</span><b>${r.totals.scrap}</b></div></div>
+  <div class="card"><h2>Gamybos barai</h2>${simple(r.areas, ["Baras", "Darbo laikas", "Prastovos", "Užbaigta užduočių", "Brokas"], a =>
+      [esc(a.name), hm(a.work_s), `${hm(a.pause_s)} <span class="muted">${Math.round(100 * a.pause_share)}%</span>`, a.tasks_done, a.scrap || "—"])}</div>
   <div class="card"><h2>Darbo centrai</h2><div class="tbl"><table><thead><tr><th>Centras</th><th>Darbas / prastovos</th><th>Darbo laikas</th><th>Prastovos</th><th>Užduotys</th><th>Faktas / norma</th><th>Brokas</th></tr></thead>
-    <tbody>${r.centres.map(c => `<tr><td><b class="mono">${esc(c.code)}</b> ${esc(c.name)}</td>
+    <tbody>${r.centres.map(c => `<tr><td><b class="mono">${esc(c.code)}</b> ${esc(c.name)}<br><span class="muted">${esc(c.area_name || "Be baro")}</span></td>
       <td><div class="hbar" style="width:${Math.max(8, 100 * (c.work_s + c.pause_s) / maxW)}%"><i class="w" style="flex:${c.work_s}"></i><i class="p" style="flex:${c.pause_s}"></i></div></td>
       <td class="num">${hm(c.work_s)}</td><td class="num">${hm(c.pause_s)} <span class="muted">${Math.round(100 * c.pause_share)}%</span></td>
       <td class="num">${c.tasks_done}</td><td class="num ${c.norm_ratio > 1.15 ? "s-late" : ""}">${c.norm_ratio ? c.norm_ratio.toFixed(2) : "—"}</td>
@@ -606,23 +640,37 @@ async function pageData() {
 
 // ---------- administravimas ----------
 async function pageAdmin() {
-  const [users, centres] = await Promise.all([GET("/api/users"), GET("/api/centres?all=1")]);
+  const [users, centres, areas] = await Promise.all([GET("/api/users"), GET("/api/centres?all=1"), GET("/api/areas")]);
+  const masters = users.filter(u => u.active && ["meistras", "admin", "vadovas"].includes(u.role));
+  const areaOpts = sel => opt(areas.map(a => ({ id: a.id, name: a.name })), sel, "Be baro");
   app().innerHTML = `<h1>Administravimas</h1>
   <div class="card"><h2>Vartotojai</h2><div class="tbl"><table><thead><tr><th>Vardas</th><th>Prisijungimas</th><th>Rolė</th><th>Darbo centrai</th><th>PIN</th><th>Aktyvus</th><th></th></tr></thead>
     <tbody>${users.map(u => `<tr class="${u.active ? "" : "dim"}"><td>${esc(u.name)}</td><td class="mono">${esc(u.login)}</td>
       <td><select data-u="${u.id}" data-f="role" id="u-r-${u.id}">${opt(S.meta.roles, u.role)}</select></td>
-      <td><input data-u="${u.id}" data-f="centres" value="${esc(u.centres.join(","))}" placeholder="visi" style="width:140px" id="u-c-${u.id}"></td>
+      <td><input data-u="${u.id}" data-f="centres" value="${esc(u.centres.join(","))}" placeholder="visi" title="Centrų (SV-01) arba barų (SVB) kodai per kablelį" style="width:140px" id="u-c-${u.id}"></td>
       <td>${u.has_pin ? "yra" : "—"}</td><td><input type="checkbox" data-u="${u.id}" data-f="active" ${u.active ? "checked" : ""} id="u-a-${u.id}"></td>
       <td><button class="small ghost" data-pw="${u.id}">Slaptažodis / PIN</button></td></tr>`).join("")}</tbody></table></div>
     <form id="nu" class="inline"><label>Vardas<input name="name" required id="nu-name"></label><label>Prisijungimas<input name="login" required id="nu-login"></label>
       <label>Rolė<select name="role" id="nu-role">${opt(S.meta.roles, "operatorius")}</select></label><label>Slaptažodis<input name="password" type="password" required id="nu-pw"></label>
-      <label>PIN<input name="pin" inputmode="numeric" style="width:80px" id="nu-pin"></label><label>Centrai<input name="centres" placeholder="SV-01,SV-02" id="nu-c"></label>
+      <label>PIN<input name="pin" inputmode="numeric" style="width:80px" id="nu-pin"></label><label>Centrai ar barai<input name="centres" placeholder="SVB arba SV-01,SV-02" id="nu-c"></label>
       <button class="ghost">Pridėti vartotoją</button></form></div>
-  <div class="card"><h2>Darbo centrai</h2><div class="tbl"><table><thead><tr><th>Kodas</th><th>Pavadinimas</th><th>Rūšis</th><th>Rankinis</th><th>Griežta eilė</th><th>Aktyvus</th></tr></thead>
+  <div class="card"><h2>Gamybos barai</h2>
+    <p class="muted">Baro kodą galima priskirti vartotojui vietoje atskirų centrų – tada jis mato visus to baro centrus, ir naujus taip pat.</p>
+    <div class="tbl"><table><thead><tr><th>Kodas</th><th>Pavadinimas</th><th>Meistras</th><th>Centrų</th><th>Aktyvus</th></tr></thead>
+    <tbody>${areas.map(a => `<tr class="${a.active ? "" : "dim"}"><td class="mono">${esc(a.code)}</td>
+      <td><input data-ar="${a.id}" data-f="name" value="${esc(a.name)}" style="width:280px" id="ar-n-${a.id}"></td>
+      <td><select data-ar="${a.id}" data-f="master_id" id="ar-m-${a.id}">${opt(masters, a.master_id, "—")}</select></td>
+      <td class="num">${a.centres}</td><td><input type="checkbox" data-ar="${a.id}" data-f="active" ${a.active ? "checked" : ""} id="ar-a-${a.id}"></td></tr>`).join("")
+      || `<tr><td colspan="5" class="muted">Barų dar nėra.</td></tr>`}</tbody></table></div>
+    <form id="na" class="inline"><label>Kodas<input name="code" required style="width:90px" id="nar-code"></label><label>Pavadinimas<input name="name" required id="nar-name"></label>
+      <label>Meistras<select name="master_id" id="nar-m">${opt(masters, "", "—")}</select></label><button class="ghost">Pridėti barą</button></form></div>
+  <div class="card"><h2>Darbo centrai</h2><div class="tbl"><table><thead><tr><th>Kodas</th><th>Pavadinimas</th><th>Baras</th><th>Rūšis</th><th>Rankinis</th><th>Griežta eilė</th><th>Aktyvus</th></tr></thead>
     <tbody>${centres.map(c => `<tr class="${c.active ? "" : "dim"}"><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td>
+      <td><select data-c="${c.id}" data-f="area_id" id="c-ar-${c.id}">${areaOpts(c.area_id)}</select></td>
       <td><select data-c="${c.id}" data-f="kind" id="c-k-${c.id}">${opt(S.meta.centre_kinds, c.kind)}</select></td>
       ${["manual", "strict_order", "active"].map(f => `<td><input type="checkbox" data-c="${c.id}" data-f="${f}" ${c[f] ? "checked" : ""} id="c-${f}-${c.id}"></td>`).join("")}</tr>`).join("")}</tbody></table></div>
     <form id="nc" class="inline"><label>Kodas<input name="code" required style="width:100px" id="nc-code"></label><label>Pavadinimas<input name="name" required id="nc-name"></label>
+      <label>Baras<select name="area_id" id="nc-area">${areaOpts("")}</select></label>
       <label>Rūšis<select name="kind" id="nc-kind">${opt(S.meta.centre_kinds)}</select></label><button class="ghost">Pridėti centrą</button></form></div>`;
   const splitC = v => v.split(",").map(x => x.trim()).filter(Boolean);
   $$("[data-u]").forEach(el => el.onchange = async () => {
@@ -632,7 +680,7 @@ async function pageAdmin() {
   });
   $$("[data-c]").forEach(el => el.onchange = async () => {
     const f = el.dataset.f;
-    await act(() => PUT(`/api/centres/${el.dataset.c}`, { [f]: el.type === "checkbox" ? (el.checked ? 1 : 0) : el.value }), "Įrašyta"); pageAdmin();
+    await act(() => PUT(`/api/centres/${el.dataset.c}`, { [f]: el.type === "checkbox" ? (el.checked ? 1 : 0) : f === "area_id" ? (el.value ? +el.value : null) : el.value }), "Įrašyta"); pageAdmin();
   });
   $$("[data-pw]").forEach(b => b.onclick = () => modal(`<h2>Slaptažodis ir PIN</h2>
     <label>Naujas slaptažodis<input id="m-pw" type="password"></label><label>Naujas PIN (tuščias – nekeisti, „-“ – pašalinti)<input id="m-pin" inputmode="numeric"></label>
@@ -645,7 +693,13 @@ async function pageAdmin() {
     };
   }));
   $("#nu").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.centres = splitC(d.centres || ""); await act(() => POST("/api/users", d), "Vartotojas sukurtas"); pageAdmin(); };
-  $("#nc").onsubmit = async e => { e.preventDefault(); await act(() => POST("/api/centres", formData(e.target)), "Centras sukurtas"); pageAdmin(); };
+  $("#nc").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.area_id = d.area_id ? +d.area_id : null; await act(() => POST("/api/centres", d), "Centras sukurtas"); pageAdmin(); };
+  $$("[data-ar]").forEach(el => el.onchange = async () => {
+    const f = el.dataset.f;
+    const v = f === "active" ? (el.checked ? 1 : 0) : f === "master_id" ? (el.value ? +el.value : null) : el.value;
+    try { await act(() => PUT(`/api/areas/${el.dataset.ar}`, { [f]: v }), "Įrašyta"); } finally { pageAdmin(); }
+  });
+  $("#na").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.master_id = d.master_id ? +d.master_id : null; await act(() => POST("/api/areas", d), "Baras sukurtas"); pageAdmin(); };
 }
 
 // ---------- komponentų pirkimai ----------

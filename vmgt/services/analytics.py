@@ -22,7 +22,9 @@ PLANNED_PAUSES = {"pertrauka", "pamaina"}
 def floor(con) -> list[dict]:
     """Kiekvienas darbo centras: dirba / pristabdyta / gali pradėti / laukia / nėra darbų."""
     out = []
-    for c in db.rows(con.execute("SELECT * FROM work_centres WHERE active=1 ORDER BY sort, code")):
+    from .projects import list_centres
+
+    for c in list_centres(con):
         st = {"centre": c, "state": "tuscia", "task": None, "next": None, "lock": None, "queue": 0}
         run = db.row(con.execute(
             "SELECT t.*, a.code AS assembly_code, p.code AS project_code FROM tasks t "
@@ -70,7 +72,9 @@ def report(con, date_from: str | None = None, date_to: str | None = None) -> dic
     b = f"{date_to}T23:59:59+00:00" if date_to else None
     now = db.now()
 
-    centres = {c["id"]: c for c in db.rows(con.execute("SELECT * FROM work_centres"))}
+    from .projects import list_centres
+
+    centres = {c["id"]: c for c in list_centres(con, active_only=False)}
     per_c = defaultdict(lambda: {"work_s": 0.0, "pause_s": 0.0, "tasks_done": 0, "norm_s": 0.0,
                                  "fact_s_done": 0.0, "good": 0, "scrap": 0})
     task_work = defaultdict(float)
@@ -117,12 +121,25 @@ def report(con, date_from: str | None = None, date_to: str | None = None) -> dic
             continue
         busy = v["work_s"] + v["pause_s"]
         centre_rows.append({
-            "code": c["code"], "name": c["name"], **{k: round(x) if isinstance(x, float) else x for k, x in v.items()},
+            "code": c["code"], "name": c["name"], "area_code": c["area_code"], "area_name": c["area_name"], **{k: round(x) if isinstance(x, float) else x for k, x in v.items()},
             "pause_share": round(v["pause_s"] / busy, 3) if busy else 0,
             "norm_ratio": round(v["fact_s_done"] / v["norm_s"], 2) if v["norm_s"] else None,
             "scrap_share": round(v["scrap"] / (v["good"] + v["scrap"]), 3) if (v["good"] + v["scrap"]) else 0,
         })
     centre_rows.sort(key=lambda x: -x["work_s"])
+
+    # barų suvestinė: kuri cecho dalis kiek dirbo ir kiek stovėjo
+    areas = {}
+    for r in centre_rows:
+        k = r["area_code"] or ""
+        a_ = areas.setdefault(k, {"code": k, "name": r["area_name"] or "Be baro", "work_s": 0, "pause_s": 0,
+                                  "tasks_done": 0, "scrap": 0, "good": 0})
+        for f in ("work_s", "pause_s", "tasks_done", "scrap", "good"):
+            a_[f] += r[f]
+    area_rows = sorted(areas.values(), key=lambda x: -x["work_s"])
+    for a_ in area_rows:
+        busy = a_["work_s"] + a_["pause_s"]
+        a_["pause_share"] = round(a_["pause_s"] / busy, 3) if busy else 0
 
     pause_rows = sorted(({"reason": k, "label": PAUSE_LABEL.get(k, k), "count": v["count"],
                           "seconds": round(v["seconds"]), "planned": k in PLANNED_PAUSES}
@@ -174,7 +191,7 @@ def report(con, date_from: str | None = None, date_to: str | None = None) -> dic
     from .components import supplier_report
 
     deviations.sort(key=lambda x: -(x["ratio"] or 0))
-    return {"from": date_from, "to": date_to, "centres": centre_rows, "pauses": pause_rows,
+    return {"from": date_from, "to": date_to, "areas": area_rows, "centres": centre_rows, "pauses": pause_rows,
             "waits": wait_rows, "phases": phases_out, "suppliers": supplier_report(con, a, b), "ncr": ncr, "worst_tasks": deviations[:10],
             "totals": {"work_s": round(sum(x["work_s"] for x in centre_rows)),
                        "pause_s": round(sum(x["pause_s"] for x in centre_rows)),

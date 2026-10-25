@@ -32,8 +32,8 @@ pavyzdžiais (`services/seed.py`): 3 projektai su žyme PAVYZDYS, 10 darbo
 centrų, dalis darbų „atlikta“ praeityje, kad cechas ir analitika turėtų ką
 rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 `admin`, `vadovas`, `planuotojas`, `technologas`, `meistras` (PIN 9999),
-`kokybe`, `pirkimai`, `sandelis` (PIN 5555), `op1` (PIN 1111), `op2` (2222),
-`op3` (3333, tik SV-01 / SV-02).
+`meistras2` (PIN 8888), `kokybe`, `pirkimai`, `sandelis` (PIN 5555), `op1` (PIN 1111),
+`op2` (2222), `op3` (3333, tik Suvirinimo baras `SVB`).
 
 ## Struktūra
 
@@ -42,7 +42,7 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `vmgt/db.py` | SQLite jungtis, schema (`MIGRATIONS`, `PRAGMA user_version`), laikrodis `now()` / `set_clock` testams, įvykių žurnalas `log_event` |
 | `vmgt/services/` | **Gamybos taisyklės be web** – jokio FastAPI. `RuleError` → 409, `NotFound` → 404 |
 | `services/auth.py` | Vartotojai, rolės (`ROLES`), teisės (`PERMS`), PBKDF2, sesijos (bazėje – žetono SHA-256), PIN terminalui, centrų apribojimas `can_centre` |
-| `services/projects.py` | Krepšelis, mazgai (`requires` – nuo kurių mazgų priklauso), etapai (`PHASE_KINDS`), darbo centrai |
+| `services/projects.py` | Krepšelis, mazgai (`requires` – nuo kurių mazgų priklauso), etapai (`PHASE_KINDS`), gamybos barai, darbo centrai |
 | `services/tasks.py` | Užduotys, eilės, terminalo veiksmai, **visos pradėjimo taisyklės – `block_reason`** |
 | `services/ncr.py` | Neatitiktys: atvira → priskirta → uzdaryta |
 | `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
@@ -84,6 +84,41 @@ kiti → gamyba) ir projektą perkelia iš krepšelio į vykdomus.
 sumą, o atvirą naršyklė prideda pati kas sekundę. Iki 2026-10-24 terminalas
 gaudavo sumą su atviru intervalu ir jį pridėdavo dar kartą (8:02 vietoj
 6:00). `test_terminalo_laikas_be_atviro_intervalo`.
+
+## Gamybos barai (nuo 2026-10-25)
+
+Vartotojo sprendimas: cechas skirstomas į barus, kiekvienas darbo centras
+priklauso vienam (`areas`, `work_centres.area_id`, migracija 3). Pavyzdžiuose:
+
+| Kodas | Baras | Centrai |
+|---|---|---|
+| `MAB` | Mechaninio apdirbimo | juostinis pjūklas, lazeris, plazma, lenkimas |
+| `TKB` | Tekinimo | universalios tekinimo staklės, CNC tekinimas, CNC frezavimas |
+| `SVB` | Suvirinimo | 10 rankinių surinkimo ir suvirinimo stočių `SV-01…SV-10` |
+| `DZB` | Dažymo | smėliavimas, šlapias dažymas, miltelinis dažymas |
+| `ATB` | Automatikos | elektros spintų surinkimas, programavimas ir derinimas |
+| `TIS` | Technologinių įrenginių surinkimo | mechaninis surinkimas, testavimas |
+
+- Baras turi meistrą (`master_id`); cecho lange – grupės su meistru ir
+  skaičiais (dirba / pristabdyta / gali pradėti), filtras pagal barą
+  (`localStorage pf.area`). Terminalo centro pasirinkimas, planas (`optgroup`),
+  analitika („Gamybos barai“) ir administravimas – taip pat pagal barus.
+- **Vartotojui galima priskirti baro kodą** vietoje centrų (`users.centres`
+  `["SVB"]`): `auth.can_centre(user, centras, baras)` leidžia visus to baro
+  centrus, ir naujus. Todėl baro ir centro kodai negali sutapti
+  (`save_area` / `save_centre` tikrina).
+- Centras be baro rodomas grupėje „Be baro“ – nieko nedingsta.
+- Nauja centro rūšis `programavimas` → etapas „Programavimas“ (`CENTRE_PHASE`).
+
+**PIN – greita paieška ir bandymų riba** (2026-10-25). PIN buvo PBKDF2, tad
+neturint vardo tekdavo tikrinti visus vartotojus iš eilės: 6 PIN – iki 0,9 s,
+50 operatorių būtų ~7 s. Dabar `auth.pin_key` – HMAC-SHA256 su diegties
+paslaptimi (`settings.pin_secret`, migracija 4), paieška pagal indeksą
+(0,005–0,02 s). 4 skaitmenų PIN lėta maiša vis tiek neapsaugotų (10^4
+variantų), todėl `web.app` riboja nesėkmingus bandymus: 8 per 5 min. vienam
+adresui → 429. Seni PBKDF2 PIN atpažįstami ir prisijungus perrašomi.
+`test_pin_randamas_greitai_ir_bandymu_riba`,
+`test_senas_pbkdf2_pin_perrasomas_prisijungus`, `test_barai.py`.
 
 ## Komponentų pirkimai (nuo 2026-10-25)
 

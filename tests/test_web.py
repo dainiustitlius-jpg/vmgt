@@ -96,3 +96,15 @@ def test_paskutinio_admino_neatimsi(sample_client):
     me = sample_client.get("/api/me").json()["user"]
     r = sample_client.put(f"/api/users/{me['id']}", json={"role": "operatorius"})
     assert r.status_code == 409
+
+
+def test_pin_randamas_greitai_ir_bandymu_riba(sample_client):
+    import time
+
+    t0 = time.monotonic()
+    assert login(sample_client, pin="3333")["login"] == "op3"
+    assert time.monotonic() - t0 < 0.5       # buvo iki 0,9 s su 6 PIN
+    for _ in range(8):
+        assert sample_client.post("/api/login", json={"pin": "0000"}).status_code == 409
+    r = sample_client.post("/api/login", json={"pin": "3333"})
+    assert r.status_code == 429 and "Palaukite" in r.json()["detail"]

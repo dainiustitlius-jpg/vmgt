@@ -94,6 +94,11 @@ tr.dim td { color: var(--muted); }
 .legend i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
 /* cechas */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { font-size: 13px; padding: 5px 10px; }
+section.area { display: grid; gap: 10px; }
+.area-h { border-bottom: 2px solid var(--line); padding-bottom: 6px; }
+.tm h2 { margin-top: 6px; }
 .floor { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .wc { background: var(--paper); border: 1px solid var(--line); border-top: 5px solid var(--wait); border-radius: 6px; padding: 12px; display: grid; gap: 6px; text-decoration: none; color: inherit; }
 .wc.dirba { border-top-color: var(--ok); } .wc.pristabdyta { border-top-color: var(--pause); }

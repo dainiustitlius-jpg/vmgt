@@ -28,15 +28,17 @@ PAUSE_LABEL = dict(PAUSE_REASONS)
 
 # Centro rūšis pasako, kurio projekto etapo darbas vyksta – pirmas pradėtas
 # darbas tą etapą pažymi „vykdoma“, tad projekto eiga matoma be ataskaitų.
-CENTRE_PHASE = {"surinkimas": "surinkimas", "elektra": "surinkimas", "testavimas": "testavimas"}
+CENTRE_PHASE = {"surinkimas": "surinkimas", "elektra": "surinkimas", "programavimas": "programavimas",
+                "testavimas": "testavimas"}
 
 
 def _task(con, task_id) -> dict:
     t = db.row(con.execute(
         "SELECT t.*, c.code AS centre_code, c.name AS centre_name, c.kind AS centre_kind, "
-        "c.strict_order, a.code AS assembly_code, a.name AS assembly_name, "
+        "c.strict_order, ar.code AS area_code, a.code AS assembly_code, a.name AS assembly_name, "
         "p.code AS project_code, p.name AS project_name "
         "FROM tasks t JOIN work_centres c ON c.id=t.centre_id JOIN assemblies a ON a.id=t.assembly_id "
+        "LEFT JOIN areas ar ON ar.id=c.area_id "
         "JOIN projects p ON p.id=t.project_id WHERE t.id=?", (task_id,)))
     if not t:
         raise NotFound("Užduoties nėra")
@@ -203,7 +205,7 @@ def _open_pause(con, task_id):
 def _check_user(user, t):
     from .auth import can_centre
 
-    if not can_centre(user, t["centre_code"]):
+    if not can_centre(user, t["centre_code"], t.get("area_code")):
         raise RuleError("Šis darbo centras jums nepriskirtas")
 
 

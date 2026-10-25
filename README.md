@@ -13,6 +13,13 @@ integracijų: duomenys įvedami ranka arba importuojami iš CSV.
 
 ## Paleidimas
 
+Windows kompiuteryje paprasčiausia – dukart spustelėti **`paleisti.bat`**: jis
+parsisiunčia naujausią versiją, įdiegia bibliotekas ir paleidžia servisą.
+**`pradeti_is_naujo.bat`** ištrina testinę bazę (paklausęs patvirtinimo), kad
+kitą kartą būtų sukurti nauji pavyzdžiai.
+
+Arba ranka:
+
 ```powershell
 pip install -r requirements.txt
 python -m vmgt

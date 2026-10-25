@@ -23,7 +23,7 @@ Architektūros juodraštis: https://claude.ai/artifact/9EELgdH4xQFqTFnbJmm8nt
 ## Paleidimas
 
 `python -m vmgt` (portas 8080). Nustatymai – `vmgt_config.json` darbo
-kataloge (`host`, `port`, `data_dir`, `seed_sample`, `session_hours`, `nc_dir`, `nc_share`); failo
+kataloge (`host`, `port`, `data_dir`, `seed_sample`, `seed_demo`, `session_hours`, `nc_dir`, `nc_share`); failo
 nėra – numatytosios. Duomenys – `data/` (`vmgt.db`, įkelti brėžiniai
 `data/files/`), į git neįtraukiami.
 
@@ -33,7 +33,33 @@ centrų, dalis darbų „atlikta“ praeityje, kad cechas ir analitika turėtų 
 rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 `admin`, `vadovas`, `planuotojas`, `technologas`, `meistras` (PIN 9999),
 `meistras2` (PIN 8888), `kokybe`, `pirkimai`, `sandelis` (PIN 5555), `op1` (PIN 1111),
-`op2` (2222), `op3` (3333, tik Suvirinimo baras `SVB`).
+`op2` (2222), `op3` (3333, tik Suvirinimo baras `SVB`); demo operatoriai pagal barus:
+`cnc1` (4001, TKB), `suv1` (4002, SVB), `daz1` (4003, DZB), `elek1` (4004, ATB),
+`sur1` (4005, TIS).
+
+**Penki pavyzdiniai projektai su visu technologiniu keliu** (`services/demo.py`,
+nuo 2026-10-25, `seed_demo`, numatyta įjungta). Vartotojo prašymas: netikri
+projektai su pilnu keliu, problemomis, sprendimais, neatitiktimis.
+
+| Projektas | Stadija | Problemos ir sprendimai |
+|---|---|---|
+| P-24095 Paletizavimo celė | baigtas | robotas vėlavo → programuota simuliatoriuje; rėmo deformacija → ištiesinta; dangos storis → perdažyta; FAT saugos zona → perprogramuota |
+| P-24113 Vežimėlių sistema VTS-6 | testavimas | lenkimo preso gedimas; ratų lizdai → nauji ratai, pirmos detalės patikra; pozicionavimo paklaida – **atvira** |
+| P-24102 Sraigtiniai transporteriai | surinkimas laukia | lenkimo kampas → programa v2 (meistras patvirtino); velenas → perdarytas; motoreduktoriai vėluoja (sveikata raudona) |
+| P-24108 Hidraulinis presas HP-60 | gamyba baigta | lakšto sertifikatas → partija pakeista; brėžinio klaida → rev. B; plazmos antgalis |
+| P-24126 NP talpa T-3000 | pradžia | korpusas suvirinamas; maišyklės maršrutas – juodraštis be failo; pjūvio oksidacija – **atvira** |
+
+Istorija kuriama **tais pačiais veiksmais** kaip ceche (išleidimas, Start /
+Pauzė / Stop, neatitiktys, susitikimai, gavimai), ne įrašais į lenteles:
+operacijos planuojamos pamainomis (I–V 05:00–13:30 UTC), kai centras laisvas
+ir ankstesnės baigtos, su 0,3–1,5 d. laukimu tarp operacijų; surinkimas /
+programavimas / testavimas – ne anksčiau nei etapas plane; tada įvykiai
+vykdomi laiko tvarka (`heapq` – įvykis gali sukurti naujų), o kas po „dabar“
+– neįvyksta. Todėl dabartinė būsena atsiranda savaime bet kurią dieną.
+`RESERVED` (LAZ-01, LNK-01, SV-01) – paskutines 3 dienas jas naudoja
+pagrindiniai pavyzdžiai. Testai (`sample_client`) – be demo; `test_demo.py` –
+4 skirtingos „dabar“ datos. Rasta: įvykiai, pridėti vykdymo metu
+(komponentų gavimai), su `sorted()` sąrašu neįvykdavo → `heapq`.
 
 ## Struktūra
 
@@ -55,6 +81,7 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `services/health.py` | Projekto sveikata realiu laiku: 4 sritys, lygiai, priežastys |
 | `services/capacity.py` | Resursų apkrova: departamentų poreikis prieš pajėgumą savaitėmis, trūkumai, krepšelio projektų tilpimas |
 | `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
+| `services/seed.py`, `demo.py` | Pavyzdiniai duomenys; `demo` – 5 projektai su visa istorija |
 | `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
 | `vmgt/web/static/` | `index.html`, `app.js` (hash maršrutai), `app.css` – be surinkimo įrankio |
 | `pavyzdziai/marsrutai.csv`, `komponentai.csv` | Importo pavyzdžiai |

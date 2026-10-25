@@ -20,6 +20,8 @@ class Config:
     data_dir: str = "data"
     # tuščią bazę užpildyti pavyzdiniais duomenimis (testinė aplinka)
     seed_sample: bool = True
+    # ir penki pavyzdiniai projektai su visu technologiniu keliu (`demo.py`)
+    seed_demo: bool = True
     session_hours: int = 12
     # technologo failų (DXF, NC, programų) katalogas; gali būti tinklo diskas,
     # kurį mato ir staklių kompiuteriai. Tuščia – data_dir/nc

@@ -30,7 +30,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     con = db.connect(cfg.db_path)
     db.migrate(con)
     if cfg.seed_sample and seed.is_empty(con):
-        seed.seed(con, cfg.files_dir, nc_dir=cfg.nc_path)
+        seed.seed(con, cfg.files_dir, nc_dir=cfg.nc_path, demo_projects=cfg.seed_demo)
     con.close()
 
     @app.exception_handler(RuleError)

@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import actions, auth, capacity, components, drawings, meetings, ncfiles, projects, routing, tasks
+from . import actions, auth, capacity, components, demo, drawings, meetings, ncfiles, projects, routing, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -82,7 +82,7 @@ def _text(*lines: str) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
-def seed(con, files_dir: Path, today: datetime | None = None, nc_dir: Path | None = None) -> None:
+def seed(con, files_dir: Path, today: datetime | None = None, nc_dir: Path | None = None, demo_projects=True) -> None:
     nc_dir = nc_dir or files_dir.parent / "nc"
     today = today or datetime.now(timezone.utc).replace(microsecond=0)
     real_clock = db._clock
@@ -234,6 +234,12 @@ def seed(con, files_dir: Path, today: datetime | None = None, nc_dir: Path | Non
                 tasks.approve_queue(con, uid["planuotojas"], c)
         # DAZ-01: patvirtinamos tik P-24117 užduotys
         con.execute("UPDATE tasks SET approved=1 WHERE centre_id=? AND project_id=?", (cid["DAZ-01"], p1))
+
+        # penki pavyzdiniai projektai su visu technologiniu keliu ir istorija
+        # (`demo.py`) – prieš pagrindinių pavyzdžių paskutines dienas, nes šie
+        # užima LAZ-01, LNK-01 ir SV-01 iki dabar
+        if demo_projects:
+            demo.run(con, uid, cid, today, files_dir, nc_dir)
 
         # --- istorija: atlikti etapai ir darbai ---
         for key, s, e in [("p100", -18, -12), ("t100", -12, -9), ("p200", -16, -9), ("p300", -15, -5)]:

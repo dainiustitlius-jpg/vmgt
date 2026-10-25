@@ -35,7 +35,15 @@ def clock():
 
 @pytest.fixture
 def sample_client(tmp_path):
-    cfg = config.Config(data_dir=str(tmp_path / "data"), seed_sample=True)
+    # be penkių pavyzdinių projektų (`demo.py`) – kiti testai remiasi pagrindiniais
+    # pavyzdžiais, o demo turi savo testą (test_demo.py)
+    cfg = config.Config(data_dir=str(tmp_path / "data"), seed_sample=True, seed_demo=False)
+    return TestClient(create_app(cfg))
+
+
+@pytest.fixture
+def demo_client(tmp_path):
+    cfg = config.Config(data_dir=str(tmp_path / "data"), seed_sample=True, seed_demo=True)
     return TestClient(create_app(cfg))
 
 

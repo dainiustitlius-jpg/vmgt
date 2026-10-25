@@ -354,17 +354,31 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
         owner_id = user["id"] if owner == "me" else (int(owner) if owner else None)
         if owner_id != user["id"] and "view" not in auth.perms_of(user):
             raise HTTPException(403, "Galite matyti tik savo užduotis")
-        return actions.list_actions(con, project_id, owner_id, status or None)
+        return actions.list_actions(con, project_id, owner_id, status or None, viewer_id=user["id"])
 
     @app.post("/api/actions")
-    def action_new(body: dict, user=Depends(need("actions")), con=Depends(get_con)):
+    def action_new(body: dict, user=Depends(get_user), con=Depends(get_con)):
+        # asmeninę užduotį sau kuria kiekvienas, projekto – teisė `actions`
+        if body.get("project_id") and "actions" not in auth.perms_of(user):
+            raise HTTPException(403, "Projekto užduotis kuria projekto vadovas ir komanda")
         return {"id": actions.create(con, user["id"], body)}
+
+    @app.get("/api/my/week")
+    def my_week(start: str | None = None, user=Depends(get_user), con=Depends(get_con)):
+        from datetime import date
+
+        try:
+            d = date.fromisoformat(start) if start else None
+        except ValueError:
+            raise HTTPException(400, "Neteisinga data") from None
+        return actions.week(con, user["id"], d)
 
     @app.get("/api/actions/{aid}")
     def action_get(aid: int, user=Depends(get_user), con=Depends(get_con)):
         x = actions.get(con, aid)
-        if x["owner_id"] != user["id"] and "view" not in auth.perms_of(user):
-            raise HTTPException(403, "Ne jūsų užduotis")
+        if not actions.can_see(user, x):
+            # svetima asmeninė užduotis – lyg jos nebūtų
+            raise HTTPException(404 if x["personal"] else 403, "Užduoties nėra" if x["personal"] else "Ne jūsų užduotis")
         x["history"] = actions.history(con, aid)
         x["can_edit"] = actions.can_edit(user, x)
         return x

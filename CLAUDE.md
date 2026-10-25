@@ -156,6 +156,22 @@ trukmė `wait_seconds`). Keisti visas – teisė `actions`; savo užduoties
 statusą ir komentarus – pats atsakingasis, kad ir kokia rolė (operatorius
 mato `?owner=me`). Vėluoja – terminas praėjo, o būsena atvira.
 
+**Mano darbai – asmeninis savaitės planas (`#/mano`, nuo 2026-10-25).**
+Vartotojo sprendimai: lange – **asmeninės + man priskirtos projektų**
+užduotys; planas – **savaitė dienomis**; asmeninės – **matomos tik man**.
+Asmeninė užduotis – `actions` be projekto (migracija 8 perkūrė lentelę:
+`project_id` gali būti NULL, nauji `plan_date`, `estimate_h`). Kuria kiekvienas
+(ir operatorius), savininkas – visada kūrėjas; kitiems ji neegzistuoja (404,
+ne 403 – net vadovui). Kolegai priskirti – tik susiejus su projektu (tada ją
+mato komanda); atgal asmenine nepaverčiama. Asmeninę galima iškart pažymėti
+atlikta (projekto – tik per „vykdoma“). Dieną ir įvertį keičia tik
+atsakingasis; pasikeitus atsakingajam planas išvalomas. Stulpeliai:
+Neplanuota, Pr–Pn (savaitgalis – tik jei jame kas yra), Vėliau; dienos
+valandos prieš `DAY_HOURS` = 8. Neatlikta praėjusios dienos užduotis rodoma
+pirmą darbo dieną su „↻ perkelta iš …“ – `plan_date` neperrašomas, tad matyti,
+nuo kada stumiama. Savaitgalį planas – nuo pirmadienio. Į praeitį planuoti
+negalima. `actions.week`, `test_mano_darbai.py`.
+
 **Protokolai (`meetings`).** Dalyviai (vartotojai + svečiai tekstu),
 darbotvarkė, aptarta, sprendimai (po vieną eilutėje), veiksmai. Kiekvienas
 veiksmas su pavadinimu – iškart `actions` su `meeting_id`. Kitame susitikime

@@ -319,6 +319,19 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
                                  "new_actions": [{"title": "Parengti apsauginės tvoros brėžinius", "owner_id": uid["technologas"],
                                                   "due_date": d(4), "priority": 2}]})
 
+        # asmeninis darbų planas: užduotys sau (matomos tik savininkui) ir
+        # suplanuotos projektų užduotys; vakar neatlikta rodoma šiandien
+        for who, title, day, h in [("vadovas", "Paruošti pasiūlymą UAB Pavyzdys (talpų stovai)", 0, 3),
+                                   ("vadovas", "Peržiūrėti savaitės ataskaitą direktoriui", -1, 1),
+                                   ("vadovas", "Atnaujinti rizikų sąrašą", None, 2),
+                                   ("technologas", "Susitvarkyti Lantek lakštų bibliotekas", 1, 4),
+                                   ("technologas", "Perskaityti naujų suvirinimo vielų specifikacijas", None, None)]:
+            actions.create(con, uid[who], {"title": title, "plan_date": d(day) if day is not None else None,
+                                           "estimate_h": h})
+        by_title = lambda t: con.execute("SELECT id FROM actions WHERE title LIKE ?", (t + "%",)).fetchone()[0]
+        actions.update(con, U("technologas"), by_title("Parengti apsauginės tvoros"), {"plan_date": d(0), "estimate_h": 5})
+        actions.update(con, U("vadovas"), by_title("Atnaujinti projekto planą"), {"plan_date": d(2), "estimate_h": 2})
+
         # nauja brėžinio revizija po užduočių sukūrimo – dažymo užduotis bus užrakinta
         at(today - timedelta(hours=5))
         drawings.save(con, files_dir, admin, "1023-100", "B", "1023-100_B.pdf",

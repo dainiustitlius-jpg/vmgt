@@ -332,6 +332,44 @@ MIGRATIONS: list[str] = [
     CREATE INDEX ix_transfers_from ON transfers (from_task_id);
     CREATE INDEX ix_transfers_to ON transfers (to_task_id);
     """,
+    # 8 – asmeninis darbų planas: užduotis be projekto (matoma tik
+    # atsakingajam), planuojama diena ir įvertis valandomis. SQLite NOT NULL
+    # nuimti negali, tad lentelė perkuriama (action_log nuoroda išlieka –
+    # ji rodo į pavadinimą „actions“)
+    """
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE actions_new (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id),    -- NULL – asmeninė užduotis
+        assembly_id INTEGER REFERENCES assemblies(id),
+        phase_id INTEGER REFERENCES phases(id),
+        meeting_id INTEGER REFERENCES meetings(id),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        owner_id INTEGER REFERENCES users(id),
+        priority INTEGER NOT NULL DEFAULT 2,
+        status TEXT NOT NULL DEFAULT 'nauja',
+        due_date TEXT,
+        wait_reason TEXT NOT NULL DEFAULT '',
+        created_by INTEGER REFERENCES users(id),
+        created TEXT NOT NULL,
+        updated TEXT NOT NULL,
+        started_at TEXT,
+        done_at TEXT,
+        plan_date TEXT,                                 -- kurią dieną atsakingasis planuoja daryti
+        estimate_h REAL                                 -- jo įvertis, val.
+    );
+    INSERT INTO actions_new (id, project_id, assembly_id, phase_id, meeting_id, title, description, owner_id,
+        priority, status, due_date, wait_reason, created_by, created, updated, started_at, done_at)
+        SELECT id, project_id, assembly_id, phase_id, meeting_id, title, description, owner_id,
+        priority, status, due_date, wait_reason, created_by, created, updated, started_at, done_at FROM actions;
+    DROP TABLE actions;
+    ALTER TABLE actions_new RENAME TO actions;
+    CREATE INDEX ix_actions_project ON actions (project_id, status);
+    CREATE INDEX ix_actions_owner ON actions (owner_id, status);
+    CREATE INDEX ix_actions_plan ON actions (owner_id, plan_date);
+    PRAGMA foreign_keys = ON;
+    """,
 ]
 
 

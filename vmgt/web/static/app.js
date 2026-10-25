@@ -82,6 +82,7 @@ const ROUTES = [
   [/^#\/?$/, pageHome],
   [/^#\/p\/(\d+)(?:\/(\w+))?$/, pageProject],
   [/^#\/uzduotys$/, pageMyActions],
+  [/^#\/mano(?:\/(\d{4}-\d{2}-\d{2}))?$/, pageMyWeek],
   [/^#\/apkrova$/, pageCapacity],
   [/^#\/m\/(\d+)$/, pageMeeting],
   [/^#\/m\/(naujas)\/(\d+)$/, pageMeetingEdit],
@@ -121,7 +122,7 @@ function renderNav() {
   if (!S.me) { top.hidden = true; return; }
   top.hidden = false;
   const items = [
-    ["#/", "Projektai", "view"], ["#/uzduotys", "Užduotys", null], ["#/apkrova", "Apkrova", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
+    ["#/", "Projektai", "view"], ["#/mano", "Mano darbai", null], ["#/uzduotys", "Užduotys", null], ["#/apkrova", "Apkrova", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
     ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"],
     ["#/komponentai", "Komponentai", "view"],
     ["#/analitika", "Analitika", "view"], ["#/duomenys", "Duomenys", "tasks"], ["#/admin", "Administravimas", "admin"],
@@ -392,7 +393,7 @@ function renderBoard(el, list, o = {}) {
         return `<div class="col"><div class="colh">${esc(c.label)} <span class="muted">${items.length}</span></div>${items.map(x => `
           <div class="acard ${x.overdue ? "late" : ""}" data-act="${x.id}" tabindex="0">
             <b>${esc(x.title)}</b>
-            ${o.global ? `<div class="muted mono">${esc(x.project_code)}</div>` : ""}
+            ${o.global ? `<div class="muted mono">${x.personal ? "asmeninė" : esc(x.project_code)}</div>` : ""}
             <div class="muted">${esc(x.owner_name || "nepriskirta")}${x.due_date ? ` · iki <span class="nw ${x.overdue ? "s-late" : ""}">${esc(x.due_date)}</span>` : ""}</div>
             ${x.status === "laukia" && x.wait_reason ? `<div class="warn">⏸ ${esc(x.wait_reason)}</div>` : ""}
             <div class="row" style="gap:6px">${PRIO[x.priority] ? `<span class="prio p${x.priority}">${PRIO[x.priority]}</span>` : ""}${x.meeting_id ? `<span class="muted">📋 susitikimas</span>` : ""}</div>
@@ -424,17 +425,21 @@ function wireActionForm(p, after) {
 
 async function actionModal(id, after) {
   const [x, users] = await Promise.all([GET(`/api/actions/${id}`), can("view") ? GET("/api/users") : []]);
-  const ed = x.can_edit, full = can("actions");
-  modal(`<div class="row between"><span class="muted mono">${esc(x.project_code)}${x.assembly_code ? " · " + esc(x.assembly_code) : ""}</span>${pill(actCls(x), x.status_label)}</div>
+  const ed = x.can_edit, full = x.personal ? ed : can("actions"), mine = x.owner_id === S.me.id;
+  const projs = x.personal && can("view") ? await GET("/api/projects") : [];
+  modal(`<div class="row between"><span class="muted mono">${x.personal ? "Asmeninė užduotis – matote tik jūs" : esc(x.project_code)}${x.assembly_code ? " · " + esc(x.assembly_code) : ""}</span>${pill(actCls(x), x.status_label)}</div>
     ${full ? `<input id="ax-title" value="${esc(x.title)}" style="font-size:17px;font-weight:600">` : `<h2>${esc(x.title)}</h2>`}
     ${x.meeting_id ? `<div class="muted">Kilo iš susitikimo: <a href="#/m/${x.meeting_id}">${esc(x.meeting_title)}</a></div>` : ""}
     <div class="grid2" style="gap:10px">
-      <label>Atsakingas${full ? `<select id="ax-owner">${opt(users.filter(u => u.active), x.owner_id, "—")}</select>` : `<b>${esc(x.owner_name || "—")}</b>`}</label>
+      ${x.personal && projs.length ? `<label>Susieti su projektu<select id="ax-proj">${opt(projs.map(p => ({ id: p.id, name: `${p.code} ${p.name}` })), "", "— asmeninė —")}</select></label>` : ""}
+      <label>Atsakingas${full && !x.personal ? `<select id="ax-owner">${opt(users.filter(u => u.active), x.owner_id, "—")}</select>` : `<b>${esc(x.owner_name || "—")}</b>`}</label>
+      ${mine ? `<label>Planuoju daryti<input type="date" id="ax-plan" value="${esc(x.plan_date || "")}"></label>
+        <label>Įvertis, val.<input type="number" min="0" step="0.5" id="ax-est" value="${x.estimate_h ?? ""}"></label>` : ""}
       <label>Terminas${full ? `<input type="date" id="ax-due" value="${esc(x.due_date || "")}">` : `<b class="${x.overdue ? "s-late" : ""}">${esc(x.due_date || "—")}</b>`}</label>
       <label>Prioritetas${full ? `<select id="ax-prio">${opt(S.meta.priorities, x.priority)}</select>` : `<b>${esc((S.meta.priorities.find(p => p.key === x.priority) || {}).label)}</b>`}</label>
     </div>
     <label>Aprašymas${full ? `<textarea id="ax-desc">${esc(x.description)}</textarea>` : `<div>${esc(x.description || "—")}</div>`}</label>
-    ${full ? `<div><button class="ghost" id="ax-save">Įrašyti pakeitimus</button></div>` : ""}
+    ${full || mine ? `<div><button class="ghost" id="ax-save">Įrašyti pakeitimus</button>${x.personal && projs.length ? ` <span class="muted">Susieta su projektu užduotis tampa matoma komandai ir ją galima priskirti kolegai.</span>` : ""}</div>` : ""}
     ${x.status === "laukia" ? `<div class="warn">⏸ Laukia: ${esc(x.wait_reason)}</div>` : ""}
     ${ed && x.next.length ? `<div class="card" style="gap:8px"><b>Keisti statusą</b>
       <input id="ax-reason" placeholder="Priežastis (būtina laukiant ar atšaukiant)">
@@ -453,8 +458,12 @@ async function actionModal(id, after) {
     $("#ax-cbtn").onclick = async () => { await act(() => POST(`/api/actions/${id}/comment`, { text: $("#ax-com").value })); actionModal(id, after); };
     const sv = $("#ax-save");
     if (sv) sv.onclick = async () => {
-      await act(() => PUT(`/api/actions/${id}`, { title: $("#ax-title").value, owner_id: $("#ax-owner").value ? +$("#ax-owner").value : null,
-        due_date: $("#ax-due").value || null, priority: +$("#ax-prio").value, description: $("#ax-desc").value }), "Įrašyta");
+      const body = {};
+      if (full) Object.assign(body, { title: $("#ax-title").value, due_date: $("#ax-due").value || null, priority: +$("#ax-prio").value, description: $("#ax-desc").value });
+      if ($("#ax-owner")) body.owner_id = $("#ax-owner").value ? +$("#ax-owner").value : null;
+      if ($("#ax-proj") && $("#ax-proj").value) body.project_id = +$("#ax-proj").value;
+      if (mine) { body.plan_date = $("#ax-plan").value || null; body.estimate_h = $("#ax-est").value === "" ? null : +$("#ax-est").value; }
+      await act(() => PUT(`/api/actions/${id}`, body), "Įrašyta");
       actionModal(id, after);
     };
   });
@@ -468,6 +477,72 @@ async function pageMyActions() {
     <div id="board"></div>`;
   renderBoard($("#board"), list, { global: true, onChange: pageMyActions });
   $$("[data-mine]").forEach(b => b.onclick = () => { sessionStorage.setItem("pf.mine", b.dataset.mine); pageMyActions(); });
+}
+
+// ---------- asmeninis savaitės planas ----------
+// Kiekvienas planuojasi savo darbus: asmenines užduotis ir jam priskirtas
+// projektų. Tempiama į dieną (arba „Planuoti“ lange) – serveris saugo dieną.
+async function pageMyWeek(start) {
+  const [w, projs] = await Promise.all([GET(`/api/my/week${start ? `?start=${start}` : ""}`), can("view") ? GET("/api/projects") : []]);
+  const shift = n => addDays(w.start, n);
+  const fmtD = d => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
+  const card = x => `<div class="acard pcard ${x.overdue ? "late" : ""} ${x.status === "atlikta" ? "done" : ""}" draggable="${x.status !== "atlikta"}" data-act="${x.id}" tabindex="0">
+      <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:start">
+        ${x.personal && x.status !== "atlikta" && x.next.some(n => n.key === "atlikta") ? `<input type="checkbox" class="pdone" data-done="${x.id}" title="Atlikta" aria-label="Pažymėti atlikta">` : x.status === "atlikta" ? "✓" : ""}
+        <b>${esc(x.title)}</b></div>
+      <div class="muted small"><span class="mono">${x.personal ? "asmeninė" : esc(x.project_code)}</span>${x.estimate_h ? ` · ${String(x.estimate_h).replace(".", ",")} val.` : ""}${x.due_date ? ` · iki <span class="nw ${x.overdue ? "s-late" : ""}">${esc(x.due_date)}</span>` : ""}</div>
+      ${x.personal || x.status === "atlikta" ? "" : `<div>${pill(actCls(x), x.status_label)}</div>`}
+      ${x.rolled_from ? `<div class="warn small">↻ perkelta iš ${fmtD(x.rolled_from)}</div>` : ""}
+      ${x.late_plan ? `<div class="lock small">suplanuota po termino</div>` : ""}
+      ${x.status === "laukia" && x.wait_reason ? `<div class="warn small">⏸ ${esc(x.wait_reason)}</div>` : ""}</div>`;
+  // į praėjusią dieną planuoti negalima – ji nepriima ir neturi „+ Pridėti“
+  const col = (key, head, items, extra = "", past = false) => `<div class="col pcol ${extra}" ${past ? "" : `data-drop="${key}"`}>${head}${items.map(card).join("") || `<div class="muted empty">—</div>`}
+    ${past ? "" : `<button class="ghost small padd" data-add="${key}">+ Pridėti</button>`}</div>`;
+  const days = w.days.filter(d => !d.weekend || d.items.length);
+  app().innerHTML = `<div class="row between"><div><h1>Mano darbai</h1>
+      <p class="muted">Asmeninės užduotys (matote tik jūs) ir jums priskirtos projektų užduotys. Tempkite į dieną, kurią planuojate daryti.</p></div>
+    <div class="row"><button class="ghost" data-wk="${shift(-7)}">←</button><b class="nw">${fmtD(w.start)} – ${fmtD(w.end)}</b><button class="ghost" data-wk="${shift(7)}">→</button>
+      <button class="ghost" data-wk="">Ši savaitė</button></div></div>
+  <form id="qadd" class="inline card">
+    <label style="flex:1 1 260px">Nauja užduotis sau<input name="title" required placeholder="Ką reikia padaryti" id="qa-title" autocomplete="off"></label>
+    <label>Diena<select name="plan_date" id="qa-day">${opt([{ id: "", name: "Neplanuota" }, ...w.days.filter(d => !d.past).map(d => ({ id: d.date, name: `${d.label} ${fmtD(d.date)}` }))], w.days.some(d => d.date === w.work_day) ? w.work_day : "")}</select></label>
+    <label>Įvertis, val.<input name="estimate_h" type="number" min="0" step="0.5" style="width:90px" id="qa-est"></label>
+    ${projs.length && can("actions") ? `<label>Projektas<select name="project_id" id="qa-proj">${opt(projs.map(p => ({ id: p.id, name: `${p.code} ${p.name}` })), "", "— asmeninė —")}</select></label>` : ""}
+    <button>Pridėti</button></form>
+  <p class="muted">Atvirų: ${w.open} · dienos planas ${w.days[0].capacity} val. Neatlikta praėjusios dienos užduotis rodoma šiandien.</p>
+  <div class="board week">
+    ${col("", `<div class="colh">Neplanuota <span class="muted">${w.unplanned.length}</span></div>`, w.unplanned)}
+    ${days.map(d => col(d.date, `<div class="colh">${esc(d.label)} <span class="muted">${fmtD(d.date)}</span></div>
+      <div class="hbar ${d.over ? "over" : ""}" title="${d.hours} iš ${d.capacity} val."><i style="width:${Math.min(100, d.hours / d.capacity * 100)}%"></i></div>
+      <div class="small ${d.over ? "s-late" : "muted"}">${String(d.hours).replace(".", ",")} / ${d.capacity} val.${d.over ? " – per daug" : ""}</div>`, d.items, `${d.today ? "today" : ""} ${d.past ? "past" : ""}`, d.past)).join("")}
+    ${col(shift(7), `<div class="colh">Vėliau <span class="muted">${w.later.length}</span></div>`, w.later)}
+  </div>`;
+  const reload = () => pageMyWeek(start);
+  $$("[data-wk]").forEach(b => b.onclick = () => (location.hash = b.dataset.wk ? `#/mano/${b.dataset.wk}` : "#/mano"));
+  const f = $("#qadd");
+  f.onsubmit = async e => {
+    e.preventDefault(); const d = formData(f);
+    const body = { title: d.title, plan_date: d.plan_date || null, estimate_h: d.estimate_h === "" ? null : +d.estimate_h };
+    if (d.project_id) { body.project_id = +d.project_id; body.owner_id = S.me.id; }
+    await act(() => POST("/api/actions", body), "Pridėta"); reload();
+  };
+  $$("[data-add]").forEach(b => b.onclick = () => { $("#qa-day").value = b.dataset.add; if ($("#qa-day").value !== b.dataset.add) $("#qa-day").value = ""; $("#qa-title").focus(); });
+  $$("[data-done]").forEach(c => { c.onclick = e => e.stopPropagation(); c.onchange = async () => { await act(() => POST(`/api/actions/${c.dataset.done}/status`, { status: "atlikta" }), "Atlikta"); reload(); }; });
+  $$(".pcard[data-act]").forEach(c => {
+    c.onclick = () => actionModal(+c.dataset.act, reload);
+    c.onkeydown = e => e.key === "Enter" && c.onclick();
+    c.ondragstart = e => { e.dataTransfer.setData("text/plain", c.dataset.act); c.classList.add("drag"); };
+    c.ondragend = () => c.classList.remove("drag");
+  });
+  $$("[data-drop]").forEach(z => {
+    z.ondragover = e => { e.preventDefault(); z.classList.add("over"); };
+    z.ondragleave = () => z.classList.remove("over");
+    z.ondrop = async e => {
+      e.preventDefault(); z.classList.remove("over");
+      const id = e.dataTransfer.getData("text/plain");
+      if (id) { await act(() => PUT(`/api/actions/${id}`, { plan_date: z.dataset.drop || null })); reload(); }
+    };
+  });
 }
 
 // ---------- susitikimų protokolai ----------

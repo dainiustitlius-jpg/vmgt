@@ -272,3 +272,19 @@ svg.chart .caplbl { fill: var(--bad); font-size: 11px; font-weight: 600; }
   .rcard { break-after: page; border: 0; padding: 0; color: #000; background: #fff; }
   .rcard th, .rcard td { border-color: #000; }
 }
+
+/* asmeninis savaitės planas */
+/* dienos – vienoje eilėje kaip kalendoriuje; netelpa – slenkama lentoje, ne puslapyje */
+.board.week { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); }
+.pcol.today { box-shadow: inset 0 3px 0 var(--accent); }
+.pcol.past { opacity: .75; }
+.pcol.over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.pcard { border-left-color: var(--ready); }
+.pcard.done { border-left-color: var(--line); opacity: .6; }
+.pcard.done b { text-decoration: line-through; }
+.pcard.drag { opacity: .4; }
+.pdone { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.padd { justify-self: start; }
+.hbar { height: 6px; background: var(--paper); border-radius: 3px; overflow: hidden; }
+.hbar i { display: block; height: 100%; background: var(--ok); }
+.hbar.over i { background: var(--bad); }

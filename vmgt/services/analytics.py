@@ -171,9 +171,11 @@ def report(con, date_from: str | None = None, date_to: str | None = None) -> dic
         "SELECT category, COUNT(*) AS n FROM ncr WHERE (? IS NULL OR reported_at>=?) AND (? IS NULL OR reported_at<=?) "
         "GROUP BY category ORDER BY n DESC", (a, a, b, b)))
 
+    from .components import supplier_report
+
     deviations.sort(key=lambda x: -(x["ratio"] or 0))
     return {"from": date_from, "to": date_to, "centres": centre_rows, "pauses": pause_rows,
-            "waits": wait_rows, "phases": phases_out, "ncr": ncr, "worst_tasks": deviations[:10],
+            "waits": wait_rows, "phases": phases_out, "suppliers": supplier_report(con, a, b), "ncr": ncr, "worst_tasks": deviations[:10],
             "totals": {"work_s": round(sum(x["work_s"] for x in centre_rows)),
                        "pause_s": round(sum(x["pause_s"] for x in centre_rows)),
                        "tasks_done": sum(x["tasks_done"] for x in centre_rows),

@@ -15,7 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import config as cfgmod
 from .. import db
-from ..services import NotFound, RuleError, analytics, auth, drawings, importer, ncr, projects, seed, tasks
+from ..services import (NotFound, RuleError, analytics, auth, components, drawings, importer, ncr, projects,
+                        seed, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -106,6 +107,9 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     def project_get(pid: int, user=Depends(need("view")), con=Depends(get_con)):
         p = projects.get_project(con, pid)
         p["ncr"] = ncr.list_ncr(con, project_id=pid)
+        comps = components.list_components(con, project_id=pid)
+        p["components"] = comps
+        p["components_summary"] = components.summary(comps)
         return p
 
     @app.put("/api/projects/{pid}")
@@ -248,6 +252,55 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.post("/api/ncr/{nid}/close")
     def ncr_close(nid: int, body: dict, user=Depends(need("ncr_manage")), con=Depends(get_con)):
         ncr.close(con, user, nid, body.get("resolution", ""))
+        return {"ok": True}
+
+    # ---------- komponentų pirkimai ----------
+
+    @app.get("/api/components")
+    def comp_list(project_id: int | None = None, status: str | None = None, problems: int = 0,
+                  supplier: str | None = None, user=Depends(need("view")), con=Depends(get_con)):
+        rows = components.list_components(con, project_id, status or None, bool(problems), supplier or None)
+        allrows = components.list_components(con, project_id)
+        return {"now": db.now(), "rows": rows, "summary": components.summary(allrows),
+                "suppliers": sorted({c["supplier"] for c in allrows if c["supplier"]}),
+                "statuses": [{"key": k, "label": v} for k, v in components.STATUSES]}
+
+    @app.get("/api/components/receipts")
+    def comp_receipts(limit: int = 30, project_id: int | None = None, user=Depends(need("view")),
+                      con=Depends(get_con)):
+        return components.receipts(con, min(limit, 200), project_id)
+
+    @app.get("/api/components/template")
+    def comp_template(user=Depends(need("purchase"))):
+        return PlainTextResponse(components.template(), media_type="text/csv",
+                                 headers={"Content-Disposition": 'attachment; filename="komponentai.csv"'})
+
+    @app.post("/api/components/import")
+    async def comp_import(file: UploadFile = File(...), dry_run: int = Form(0),
+                          user=Depends(need("purchase")), con=Depends(get_con)):
+        raw = await file.read()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1257")
+        return components.import_csv(con, user, text, dry_run=bool(dry_run))
+
+    @app.post("/api/components")
+    def comp_new(body: dict, user=Depends(need("purchase")), con=Depends(get_con)):
+        return {"id": components.save(con, user["id"], body)}
+
+    @app.put("/api/components/{cid}")
+    def comp_put(cid: int, body: dict, user=Depends(need("purchase")), con=Depends(get_con)):
+        components.save(con, user["id"], body, cid)
+        return {"ok": True}
+
+    @app.post("/api/components/{cid}/receive")
+    def comp_receive(cid: int, body: dict, user=Depends(need("receive")), con=Depends(get_con)):
+        return components.receive(con, user["id"], cid, body.get("qty"), body.get("note", ""))
+
+    @app.post("/api/components/{cid}/cancel")
+    def comp_cancel(cid: int, body: dict, user=Depends(need("purchase")), con=Depends(get_con)):
+        components.cancel(con, user["id"], cid, bool(body.get("on", True)))
         return {"ok": True}
 
     # ---------- brėžiniai ir importas ----------

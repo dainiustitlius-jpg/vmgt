@@ -29,15 +29,19 @@ PERMS = {
     "docs": "Įkelti brėžinius",
     "ncr_report": "Registruoti neatitiktis",
     "ncr_manage": "Priskirti ir uždaryti neatitiktis",
+    "purchase": "Komponentų pirkimai: eilutės, importas",
+    "receive": "Registruoti komponentų gavimą",
     "admin": "Vartotojai ir darbo centrai",
 }
 
 ROLES = {
     "admin": ("Administratorius", set(PERMS)),
-    "vadovas": ("Projektų vadovas", {"view", "projects", "tasks", "plan", "docs", "ncr_report"}),
+    "vadovas": ("Projektų vadovas", {"view", "projects", "tasks", "plan", "docs", "ncr_report", "purchase"}),
+    "pirkimai": ("Pirkimų specialistas", {"view", "purchase", "receive"}),
+    "sandelis": ("Sandėlininkas", {"view", "receive"}),
     "planuotojas": ("Planuotojas", {"view", "plan", "ncr_report"}),
     "technologas": ("Technologas", {"view", "tasks", "docs", "ncr_report"}),
-    "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report"}),
+    "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report", "receive"}),
     "operatorius": ("Operatorius", {"execute", "ncr_report"}),
     "kokybe": ("Kokybės inžinierius", {"view", "ncr_report", "ncr_manage"}),
     "perziura": ("Peržiūra", {"view"}),

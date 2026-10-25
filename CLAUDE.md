@@ -32,7 +32,8 @@ pavyzdžiais (`services/seed.py`): 3 projektai su žyme PAVYZDYS, 10 darbo
 centrų, dalis darbų „atlikta“ praeityje, kad cechas ir analitika turėtų ką
 rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 `admin`, `vadovas`, `planuotojas`, `technologas`, `meistras` (PIN 9999),
-`kokybe`, `op1` (PIN 1111), `op2` (2222), `op3` (3333, tik SV-01 / SV-02).
+`kokybe`, `pirkimai`, `sandelis` (PIN 5555), `op1` (PIN 1111), `op2` (2222),
+`op3` (3333, tik SV-01 / SV-02).
 
 ## Struktūra
 
@@ -46,10 +47,11 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `services/ncr.py` | Neatitiktys: atvira → priskirta → uzdaryta |
 | `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
 | `services/importer.py` | Maršrutų CSV importas (vėliau – D365 / PDM) |
+| `services/components.py` | Komponentų pirkimai: eilutės, gavimai, CSV importas iš ERP eksporto, tiekėjų patikimumas |
 | `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
 | `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
 | `vmgt/web/static/` | `index.html`, `app.js` (hash maršrutai), `app.css` – be surinkimo įrankio |
-| `pavyzdziai/marsrutai.csv` | Importo pavyzdys |
+| `pavyzdziai/marsrutai.csv`, `komponentai.csv` | Importo pavyzdžiai |
 
 ## Duomenų modelis
 
@@ -82,6 +84,27 @@ kiti → gamyba) ir projektą perkelia iš krepšelio į vykdomus.
 sumą, o atvirą naršyklė prideda pati kas sekundę. Iki 2026-10-24 terminalas
 gaudavo sumą su atviru intervalu ir jį pridėdavo dar kartą (8:02 vietoj
 6:00). `test_terminalo_laikas_be_atviro_intervalo`.
+
+## Komponentų pirkimai (nuo 2026-10-25)
+
+Vartotojo prašymas: suprojektavus reikia užsakyti standartinius komponentus;
+atskiras langas, kurio duomenys vėliau ateis iš ERP (D365), ir **realaus laiko
+gavimo būsenos**. Langas `#/komponentai` (ir `#/komponentai/<projekto id>`),
+projekto puslapyje – santrauka ir lentelė.
+
+| | |
+|---|---|
+| eilutė | `components`: projektas, mazgas (arba visam projektui), prekės kodas, kiekis, tiekėjas, užsakymo nr. / eilutė, užsakyta, tiekėjo patvirtinta data, reikia iki, gauta, vieta |
+| būsena | **išvedama iš faktų**, ne įrašoma (`components.status_of`): neužsakyta → užsakyta (yra PO nr.) → patvirtinta data → gauta dalinai → gauta; atšaukta – žymė. Tad ji atitinka duomenis ir įvedant ranka, ir importuojant |
+| įspėjimai | `late` – patvirtinta data praėjo, ne viskas gauta; `risk` – patvirtinta data vėlesnė už „reikia iki“ arba reikia per 7 d., o data nepatvirtinta; `overdue_need` – „reikia iki“ praėjo |
+| gavimai | `component_receipts` – kiekvienas atskirai (kas, kada, kiek, šaltinis); daugiau nei užsakyta – klaida; gautos eilutės atšaukti negalima |
+| importas | CSV iš ERP eksporto (`components.COLUMNS`); eilutė atpažįstama pagal užsakymo nr. + eilutę (be jų – projektas, mazgas, prekės kodas), rasta atnaujinama; padidėjęs gautas kiekis registruojamas kaip gavimas – TIK skirtumas, tad pakartotinis importas nedubliuoja; klaida – neįrašoma niekas. Prijungus D365 tas pats `import_csv` kelias keičiamas tiesioginiu skaitymu |
+| etapas | `_sync_phase`: projekto / mazgo etapas „Komponentų užsakymas“ – vykdoma, kai kas nors užsakyta, baigta, kai viskas gauta; nauja negauta eilutė jį vėl atidaro |
+| ceche | terminale ir plane – **įspėjimas, ne draudimas** „negauti pirktiniai komponentai: N eil.“ (`missing_for_assembly`: mazgo ir viso projekto eilutės); dalį darbų galima pradėti ir be visų komponentų, sprendžia meistras |
+| teisės | `purchase` (eilutės, importas) – pirkimai, vadovas, admin; `receive` (gavimas) – pirkimai, sandėlis, meistras, admin; matyti – `view` |
+| analitika | „Tiekėjų patikimumas“: gauta vėliau nei pažadėta, vid. vėlavimas, dabar vėluoja (`supplier_report`) |
+
+Langas atsinaujina kas 30 s (ne kai atidarytas dialogas). `test_komponentai.py`.
 
 ## Analitika
 

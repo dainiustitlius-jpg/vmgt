@@ -182,6 +182,45 @@ MIGRATIONS: list[str] = [
         data TEXT NOT NULL DEFAULT '{}'
     );
     """,
+    # 2 – komponentų pirkimai ir jų gavimai
+    """
+    CREATE TABLE components (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        assembly_id INTEGER REFERENCES assemblies(id),   -- NULL – visam projektui
+        item_no TEXT NOT NULL DEFAULT '',      -- prekės kodas (D365)
+        name TEXT NOT NULL,
+        spec TEXT NOT NULL DEFAULT '',         -- gamintojas, modelis, parametrai
+        qty REAL NOT NULL DEFAULT 1,
+        unit TEXT NOT NULL DEFAULT 'vnt',
+        supplier TEXT NOT NULL DEFAULT '',
+        po_no TEXT NOT NULL DEFAULT '',        -- pirkimo užsakymo nr.
+        po_line TEXT NOT NULL DEFAULT '',
+        ordered_date TEXT,
+        promised_date TEXT,                    -- tiekėjo patvirtinta pristatymo data
+        need_date TEXT,                        -- reikia iki (gamybos poreikis)
+        qty_received REAL NOT NULL DEFAULT 0,
+        received_date TEXT,                    -- paskutinio gavimo data
+        location TEXT NOT NULL DEFAULT '',     -- sandėlio vieta
+        cancelled INTEGER NOT NULL DEFAULT 0,
+        note TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'rankinis',   -- rankinis / importas / erp
+        updated TEXT NOT NULL,
+        created TEXT NOT NULL
+    );
+    CREATE INDEX ix_components_project ON components (project_id, assembly_id);
+    CREATE INDEX ix_components_po ON components (po_no, po_line);
+    -- kiekvienas gavimas atskirai: iš jų matoma, kada ir kiek atkeliavo
+    CREATE TABLE component_receipts (
+        id INTEGER PRIMARY KEY,
+        component_id INTEGER NOT NULL REFERENCES components(id),
+        qty REAL NOT NULL,
+        at TEXT NOT NULL,
+        user_id INTEGER REFERENCES users(id),
+        source TEXT NOT NULL DEFAULT 'rankinis',
+        note TEXT NOT NULL DEFAULT ''
+    );
+    """,
 ]
 
 

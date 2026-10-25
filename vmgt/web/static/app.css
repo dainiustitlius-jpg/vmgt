@@ -30,6 +30,7 @@ h1 { font-size: 24px; } h2 { font-size: 18px; } h3 { font-size: 15px; }
 .muted { color: var(--muted); }
 .pad { padding: 24px; }
 .mono, code { font-family: var(--f-mono); font-size: .9em; }
+td.num { white-space: nowrap; }  /* datos ir užsakymų nr. nelūžta per eilutę */
 .num { font-variant-numeric: tabular-nums; }
 
 header#top { background: var(--head); color: var(--head-fg); position: sticky; top: 0; z-index: 5; }
@@ -75,6 +76,8 @@ tr.dim td { color: var(--muted); }
 .s-atvira, .s-sustabdytas, .s-late { color: var(--bad); }
 .s-priskirta { color: var(--pause); } .s-uzdaryta, .s-baigtas { color: var(--ok); }
 .lock { color: var(--bad); font-size: 13px; }
+.warn { color: var(--pause); font-size: 13px; }
+.tm .warn { color: #f0b45a; }
 .prog { height: 6px; background: var(--line-soft); border-radius: 3px; overflow: hidden; min-width: 80px; }
 .prog i { display: block; height: 100%; background: var(--ok); }
 

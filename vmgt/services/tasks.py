@@ -10,7 +10,7 @@ atsakyti skirtingai.
 from __future__ import annotations
 
 from .. import db
-from . import NotFound, RuleError
+from . import NotFound, RuleError, components
 from .projects import PHASE_LABEL
 
 PAUSE_REASONS = [
@@ -331,6 +331,9 @@ def terminal_view(con, centre: dict) -> dict:
         cur_rev = current_revision(con, t["drawing_no"])
         t["drawing_current"] = cur_rev
         t["work_s"] = round(_work_seconds(con, t["id"], closed_only=True))
+        # įspėjimas, ne draudimas: dalį darbo dažnai galima pradėti ir be
+        # visų pirktinių komponentų, sprendžia meistras
+        t["components_missing"] = components.missing_for_assembly(con, t["assembly_id"])
         if t["status"] in ("vykdoma", "pristabdyta"):
             iv = _open_interval(con, t["id"])
             pz = _open_pause(con, t["id"])
@@ -362,6 +365,7 @@ def plan_view(con, centre: dict) -> list[dict]:
     for t in _open_tasks(con, centre["id"]):
         t["strict_order"] = centre["strict_order"]
         t["lock"] = None if t["status"] != "laukia" else block_reason(con, {**t, "approved": 1})
+        t["components_missing"] = components.missing_for_assembly(con, t["assembly_id"])
         out.append(t)
     return out
 

@@ -86,6 +86,7 @@ const ROUTES = [
   [/^#\/t(?:\/([\w-]+))?$/, pageTerminal],
   [/^#\/ncr$/, pageNcr],
   [/^#\/analitika$/, pageAnalytics],
+  [/^#\/komponentai(?:\/(\d+))?$/, pageComponents],
   [/^#\/duomenys$/, pageData],
   [/^#\/admin$/, pageAdmin],
 ];
@@ -115,6 +116,7 @@ function renderNav() {
   const items = [
     ["#/", "Projektai", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
     ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"],
+    ["#/komponentai", "Komponentai", "view"],
     ["#/analitika", "Analitika", "view"], ["#/duomenys", "Duomenys", "tasks"], ["#/admin", "Administravimas", "admin"],
   ].filter(x => can(x[2]));
   const h = location.hash || "#/";
@@ -263,6 +265,9 @@ async function pageProject(pid) {
       <label>Kiekis<input name="qty" type="number" min="1" value="1" style="width:70px" id="na-qty"></label>
       <label>Laukia mazgų<input name="requires" placeholder="100,200" style="width:110px" id="na-req"></label><button class="ghost">Pridėti mazgą</button></form>` : ""}
   </div>
+  <div class="card"><div class="row between"><h2>Komponentai</h2><a href="#/komponentai/${p.id}">Visi projekto pirkimai →</a></div>
+    ${compSummaryLine(p.components_summary)}
+    ${p.components.length ? compTable(p.components, { compact: true }) : `<p class="muted">Pirkimo eilučių dar nėra.</p>`}</div>
   <div class="card"><h2>Neatitiktys</h2>${ncrTable(p.ncr, false)}</div>`;
 
   const reload = () => pageProject(pid);
@@ -368,7 +373,7 @@ async function pagePlan(code) {
       <td class="num">${i + 1}</td><td><b class="mono">${esc(t.project_code)}</b> · ${esc(t.assembly_code)} ${esc(t.assembly_name)}</td>
       <td>${esc(t.name)}</td><td class="num">${t.qty_good}/${t.qty_plan}</td><td class="num">${esc(t.due_date || "—")} <span class="muted">P${t.priority}</span></td>
       <td>${pill(t.status, t.status)} ${t.approved ? "" : '<span class="muted">nepatvirtinta</span>'}</td>
-      <td class="lock">${esc(t.lock || "")}</td>
+      <td class="lock">${esc(t.lock || "")}${t.components_missing ? `<div class="warn">⚠ negauti komponentai: ${t.components_missing} eil.</div>` : ""}</td>
       <td class="row" style="flex-wrap:nowrap"><button class="small ghost" data-mv="top" data-id="${t.id}" title="Į pradžią">⤒</button>
         <button class="small ghost" data-mv="up" data-id="${t.id}">▲</button><button class="small ghost" data-mv="down" data-id="${t.id}">▼</button></td></tr>`).join("")
       || `<tr><td colspan="8" class="muted">Eilėje užduočių nėra.</td></tr>`}</tbody></table></div></div>`;
@@ -402,7 +407,8 @@ async function pageTerminal(code) {
         <div class="q ${!run && i === first ? "next" : ""}">
           <div><b>${esc(t.project_code)} · ${esc(t.assembly_code)} ${esc(t.assembly_name)}</b><br>${esc(t.name)} · ${t.qty_plan - t.qty_good} vnt.${t.qty_good ? ` (padaryta ${t.qty_good})` : ""}
             ${t.drawing_no ? ` · <a href="/api/drawings/${encodeURIComponent(t.drawing_no)}/file?rev=${encodeURIComponent(t.drawing_current || t.drawing_rev)}" target="_blank">brėžinys ${esc(t.drawing_no)}</a>` : ""}
-            ${t.lock ? `<div class="lock">🔒 ${esc(t.lock)}</div>` : ""}</div>
+            ${t.lock ? `<div class="lock">🔒 ${esc(t.lock)}</div>` : ""}
+            ${t.components_missing ? `<div class="warn">⚠ Negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}</div>
           <div>${t.lock && t.lock.includes("revizija") && can("ack_rev") ? `<button class="b-pause" data-ack="${t.id}">Patvirtinti reviziją</button>` : ""}
             ${!run && !t.lock ? `<button class="b-ok" data-start="${t.id}">▶ Start</button>` : ""}</div>
         </div>`).join("") || `<p class="muted">Tuščia.</p>`}
@@ -430,6 +436,7 @@ function runCard(t) {
     <div class="muted">${paused ? "PRISTABDYTA" : "DABAR VYKDOMA"} · projektas ${esc(t.project_code)} ${esc(t.project_name)}</div>
     <h2 style="font-size:22px">${esc(t.assembly_code)} ${esc(t.assembly_name)} · ${esc(t.name)}</h2>
     <div class="timer" id="timer">${dur(t.work_s + (paused ? 0 : since(t.since)))}</div>
+    ${t.components_missing ? `<div class="warn">⚠ Šiam mazgui dar negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}
     ${paused ? `<div style="color:var(--pause)">⏸ ${esc(t.pause.reason_label)}${t.pause.note ? ` – ${esc(t.pause.note)}` : ""} · <span id="ptimer">${dur(since(t.pause.start))}</span></div>` : ""}
     <div class="row muted">Planuota ${t.qty_plan} vnt. · padaryta ${t.qty_good}${t.qty_scrap ? ` · brokas ${t.qty_scrap}` : ""}${t.norm_min ? ` · norma ${t.norm_min} min/vnt` : ""}
       ${t.drawing_no ? ` · brėžinys ${esc(t.drawing_no)} <span class="${revOk ? "rev-ok" : "rev-bad"}">rev. ${esc(t.drawing_rev)} ${revOk ? "✓" : `(galioja ${esc(t.drawing_current)})`}</span>` : ""}</div>
@@ -552,6 +559,8 @@ async function pageAnalytics() {
     <div class="card"><h2>Laukimas prieš operaciją</h2>${simple(r.waits, ["Centras", "Kartai", "Mediana", "Iš viso"], w => [`<span class="mono">${esc(w.code)}</span> ${esc(w.name)}`, w.count, hm(w.median_s), hm(w.total_s)])}
       <p class="muted">Laikas nuo ankstesnės maršruto operacijos pabaigos iki šios pradžios.</p></div>
     <div class="card"><h2>Etapai: planas ir faktas</h2>${simple(r.phases, ["Etapas", "Baigta", "Vėlavo", "Vid. planas, d.", "Vid. faktas, d."], p => [esc(p.label), p.count, p.late, p.avg_plan_d, p.avg_fact_d])}</div>
+    <div class="card"><h2>Tiekėjų patikimumas</h2>${simple(r.suppliers, ["Tiekėjas", "Eilučių", "Gauta", "Gauta vėliau", "Vid. vėlavimas, d.", "Dabar vėluoja"], x => [esc(x.supplier), x.lines, x.received, x.late, x.avg_delay_d || "—", x.open_late ? `<span class="s-late">${x.open_late}</span>` : 0])}
+      <p class="muted">Gauta vėliau – gavimo data vėlesnė už tiekėjo patvirtintą.</p></div>
     <div class="card"><h2>Neatitiktys pagal kategoriją</h2>${simple(r.ncr, ["Kategorija", "Kiekis"], n => [esc((S.meta.ncr_categories.find(c => c.key === n.category) || {}).label || n.category), n.n])}</div>
   </div>
   <div class="card"><h2>Labiausiai normą viršijusios užduotys</h2>${simple(r.worst_tasks, ["Centras", "Užduotis", "Norma", "Faktas", "Santykis"], w => [`<span class="mono">${esc(w.centre)}</span>`, esc(w.name), hm(w.norm_s), hm(w.fact_s), w.ratio ? w.ratio.toFixed(2) : "—"])}</div>`;
@@ -637,6 +646,161 @@ async function pageAdmin() {
   }));
   $("#nu").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.centres = splitC(d.centres || ""); await act(() => POST("/api/users", d), "Vartotojas sukurtas"); pageAdmin(); };
   $("#nc").onsubmit = async e => { e.preventDefault(); await act(() => POST("/api/centres", formData(e.target)), "Centras sukurtas"); pageAdmin(); };
+}
+
+// ---------- komponentų pirkimai ----------
+const compStatusCls = st => ({ reikia: "atvira", uzsakyta: "laukia", patvirtinta: "gali", dalinai: "pristabdyta", gauta: "baigta", atsaukta: "tuscia" }[st] || st);
+const fmtQ = q => (Math.round(q * 1000) / 1000).toLocaleString("lt-LT");
+
+function compSummaryLine(sm) {
+  if (!sm.total) return "";
+  return `<div class="row"><span>Gauta <b>${sm.received_pct}%</b> (${sm.by_status.gauta} iš ${sm.total})</span>
+    ${sm.late ? pill("late", `vėluoja ${sm.late}`) : ""} ${sm.risk ? pill("pristabdyta", `rizika ${sm.risk}`) : ""}
+    ${sm.by_status.reikia ? pill("atvira", `neužsakyta ${sm.by_status.reikia}`) : ""}</div>`;
+}
+
+function compFlags(c) {
+  return [c.late ? `<div class="s-late">⚠ vėluoja: žadėta ${esc(c.promised_date)}</div>` : "",
+    c.overdue_need ? `<div class="s-late">⚠ reikėjo iki ${esc(c.need_date)}</div>` : "",
+    c.risk && !c.late ? `<div class="warn">⚠ ${c.promised_date && c.need_date && c.promised_date > c.need_date ? "atvyks vėliau nei reikia" : "reikia greitai, data nepatvirtinta"}</div>` : ""].join("");
+}
+
+function compTable(rows, o = {}) {
+  const act = c => {
+    if (o.compact) return "";
+    const open = !["gauta", "atsaukta"].includes(c.status);
+    return `<td class="row" style="flex-wrap:nowrap">${open && can("receive") ? `<button class="small" data-recv="${c.id}">Gauti</button>` : ""}
+      ${can("purchase") ? `<button class="small ghost" data-edit="${c.id}">Keisti</button>` : ""}</td>`;
+  };
+  return `<div class="tbl"><table><thead><tr>${o.compact ? "" : "<th>Projektas</th>"}<th>Mazgas</th><th>Komponentas</th><th>Gauta</th><th>Tiekėjas</th><th>Užsakymas</th>
+    <th>Patvirtinta</th><th>Reikia iki</th><th>Būsena</th>${o.compact ? "" : "<th></th>"}</tr></thead><tbody>
+    ${rows.map(c => {
+      const pct = c.qty ? Math.min(100, Math.round(100 * c.qty_received / c.qty)) : 0;
+      return `<tr class="${c.status === "atsaukta" ? "dim" : ""}">
+      ${o.compact ? "" : `<td><a href="#/p/${c.project_id}" class="mono">${esc(c.project_code)}</a></td>`}
+      <td>${esc(c.assembly_code || "projektui")}</td>
+      <td><b>${esc(c.name)}</b><br><span class="muted mono">${esc(c.item_no)}</span> <span class="muted">${esc(c.spec)}</span></td>
+      <td class="num"><div class="prog"><i style="width:${pct}%"></i></div>${fmtQ(c.qty_received)} / ${fmtQ(c.qty)} ${esc(c.unit)}${c.received_date ? `<br><span class="muted">${esc(c.received_date)}</span>` : ""}</td>
+      <td>${esc(c.supplier || "—")}</td>
+      <td class="num">${c.po_no ? `<span class="mono">${esc(c.po_no)}${c.po_line ? "/" + esc(c.po_line) : ""}</span><br><span class="muted">${esc(c.ordered_date || "")}</span>` : "—"}</td>
+      <td class="num">${esc(c.promised_date || "—")}</td><td class="num">${esc(c.need_date || "—")}</td>
+      <td>${pill(compStatusCls(c.status), c.status_label)}${compFlags(c)}</td>${act(c)}</tr>`;
+    }).join("") || `<tr><td colspan="10" class="muted">Eilučių nėra.</td></tr>`}</tbody></table></div>`;
+}
+
+async function pageComponents(projectId) {
+  const key = "pf.comp";
+  let f = {}; try { f = JSON.parse(sessionStorage.getItem(key) || "{}"); } catch { f = {}; }
+  if (projectId) f.project_id = projectId;
+  const projects = await GET("/api/projects?all=1");
+  const draw = async () => {
+    const q = new URLSearchParams();
+    if (f.project_id) q.set("project_id", f.project_id);
+    if (f.status) q.set("status", f.status);
+    if (f.supplier) q.set("supplier", f.supplier);
+    if (f.problems) q.set("problems", "1");
+    const [r, rec] = await Promise.all([GET(`/api/components?${q}`), GET(`/api/components/receipts?limit=12${f.project_id ? `&project_id=${f.project_id}` : ""}`)]);
+    const sm = r.summary, b = sm.by_status;
+    const waiting = b.uzsakyta + b.patvirtinta + b.dalinai;
+    app().innerHTML = `<div class="row between"><h1>Komponentų pirkimai</h1>
+      <span class="muted">atnaujinta ${new Date(r.now).toLocaleTimeString("lt-LT")} · kas 30 s</span></div>
+    <p class="muted">Šaltinis kol kas – įvedimas ranka ir importas iš ERP eksporto. Prijungus D365, eilutės ir gavimai ateis automatiškai.</p>
+    <div class="tiles">
+      <div class="tile"><span class="muted">Eilučių</span><b>${sm.total}</b></div>
+      <div class="tile"><span class="muted">Neužsakyta</span><b class="${b.reikia ? "s-late" : ""}">${b.reikia}</b></div>
+      <div class="tile"><span class="muted">Laukiama</span><b>${waiting}</b></div>
+      <div class="tile"><span class="muted">Vėluoja</span><b class="${sm.late ? "s-late" : ""}">${sm.late}</b></div>
+      <div class="tile"><span class="muted">Rizika terminui</span><b class="${sm.risk ? "warn" : ""}">${sm.risk}</b></div>
+      <div class="tile"><span class="muted">Gauta</span><b>${sm.received_pct}%</b></div></div>
+    <form id="cf" class="inline card">
+      <label>Projektas<select name="project_id" id="cf-p">${opt(projects.map(p => ({ id: p.id, name: `${p.code} ${p.name}` })), f.project_id, "Visi")}</select></label>
+      <label>Būsena<select name="status" id="cf-s"><option value="">Visos</option><option value="open" ${f.status === "open" ? "selected" : ""}>Dar negautos</option>${opt(r.statuses, f.status)}</select></label>
+      <label>Tiekėjas<select name="supplier" id="cf-t">${opt(r.suppliers.map(x => ({ key: x, label: x })), f.supplier, "Visi")}</select></label>
+      <label class="row" style="display:flex"><input type="checkbox" name="problems" id="cf-pr" ${f.problems ? "checked" : ""}> tik vėluojančios ir rizikingos</label>
+      ${can("purchase") ? `<button type="button" id="cnew">+ Nauja eilutė</button>` : ""}</form>
+    ${compTable(r.rows)}
+    <div class="grid2">
+      <div class="card"><h2>Paskutiniai gavimai</h2>${rec.length ? rec.map(x => `<div><b>${fmtQ(x.qty)} ${esc(x.unit)}</b> ${esc(x.name)}
+        <span class="muted">· ${esc(x.project_code)} ${esc(x.assembly_code || "")} · ${dt(x.at)} · ${esc(x.user_name || x.source)}${x.qty_received < x.qty_total ? ` · iš viso ${fmtQ(x.qty_received)}/${fmtQ(x.qty_total)}` : ""}</span></div>`).join("") : `<p class="muted">Gavimų dar nėra.</p>`}</div>
+      ${can("purchase") ? `<div class="card"><h2>Importas iš ERP eksporto (CSV)</h2>
+        <p class="muted">Eilutė atpažįstama pagal užsakymo nr. ir eilutę: rasta atnaujinama, padidėjęs gautas kiekis užregistruojamas kaip gavimas. <a href="/api/components/template">Šablonas</a></p>
+        <form id="cimp" class="inline"><input type="file" name="file" accept=".csv,text/csv" required id="cimp-f">
+          <button class="ghost" value="1">Patikrinti</button><button value="0">Importuoti</button></form><div id="cimp-res"></div></div>` : ""}
+    </div>`;
+    $$("#cf select, #cf input[type=checkbox]").forEach(el => el.onchange = () => {
+      const d = formData($("#cf")); f = { project_id: d.project_id || "", status: d.status || "", supplier: d.supplier || "", problems: !!d.problems };
+      sessionStorage.setItem(key, JSON.stringify(f));
+      if (projectId && String(f.project_id) !== String(projectId)) { location.hash = "#/komponentai"; return; }
+      draw();
+    });
+    const cn = $("#cnew"); if (cn) cn.onclick = () => compForm(null, projects, draw, f.project_id);
+    $$("[data-edit]").forEach(b2 => b2.onclick = () => compForm(r.rows.find(c => c.id === +b2.dataset.edit), projects, draw));
+    $$("[data-recv]").forEach(b2 => b2.onclick = () => recvForm(r.rows.find(c => c.id === +b2.dataset.recv), draw));
+    const ci = $("#cimp");
+    if (ci) {
+      let dry = 1; $$("#cimp button").forEach(x => x.onclick = () => (dry = +x.value));
+      ci.onsubmit = async e => {
+        e.preventDefault(); const fd = new FormData(ci); fd.set("dry_run", String(dry));
+        const res = await act(() => api("POST", "/api/components/import", fd, true));
+        const box = res.errors.length ? `<p class="lock">Rasta klaidų: ${res.errors.length}. Niekas neįrašyta.</p><ul>${res.errors.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`
+          : dry ? `<p>Klaidų nėra: ${res.rows} eilučių. Galima importuoti.</p>`
+          : `<p>Importuota: naujų ${res.created}, atnaujinta ${res.updated}, gavimų ${res.receipts}.</p>`;
+        if (!dry && !res.errors.length) await draw();
+        $("#cimp-res").innerHTML = box;
+      };
+    }
+  };
+  await draw();
+  S.timers.push(setInterval(() => { if ($("#modal").hidden && !document.activeElement?.closest("form")) draw(); }, 30000));
+}
+
+function recvForm(c, after) {
+  const left = c.qty - c.qty_received;
+  modal(`<h2>Gauti: ${esc(c.name)}</h2>
+    <p class="muted">${esc(c.project_code)} ${esc(c.assembly_code || "")} · ${esc(c.supplier)} · užsakymas ${esc(c.po_no || "—")} · gauta ${fmtQ(c.qty_received)} iš ${fmtQ(c.qty)} ${esc(c.unit)}</p>
+    <label>Gautas kiekis, ${esc(c.unit)}<input id="rv-q" type="number" min="0" step="any" value="${left}"></label>
+    <label>Pastaba<input id="rv-n" placeholder="pvz. važtaraštis, pažeista pakuotė"></label>
+    <div class="row"><button id="rv-ok">Užregistruoti gavimą</button><button class="ghost" id="rv-x">Atšaukti</button></div>`, () => {
+    $("#rv-x").onclick = closeModal;
+    $("#rv-ok").onclick = async () => {
+      await act(() => POST(`/api/components/${c.id}/receive`, { qty: +$("#rv-q").value, note: $("#rv-n").value }), "Gavimas užregistruotas");
+      closeModal(); after();
+    };
+  });
+}
+
+function compForm(c, projects, after, defProject) {
+  const v = c || { project_id: defProject ? +defProject : (projects[0] || {}).id, unit: "vnt", qty: 1 };
+  const fld = (name, label, extra = "") => `<label>${label}<input name="${name}" value="${esc(v[name] ?? "")}" ${extra} id="cm-${name}"></label>`;
+  modal(`<h2>${c ? "Keisti pirkimo eilutę" : "Nauja pirkimo eilutė"}</h2>
+    <form id="cm" class="grid2" style="gap:10px">
+      <label>Projektas<select name="project_id" id="cm-project_id">${opt(projects.map(p => ({ id: p.id, name: `${p.code} ${p.name}` })), v.project_id)}</select></label>
+      <label>Mazgas<select name="assembly_id" id="cm-assembly_id"><option value="">Visam projektui</option></select></label>
+      ${fld("name", "Pavadinimas", "required")}${fld("item_no", "Prekės kodas")}${fld("spec", "Specifikacija")}
+      ${fld("qty", "Kiekis", 'type="number" step="any" min="0"')}${fld("unit", "Vnt.")}${fld("supplier", "Tiekėjas")}
+      ${fld("po_no", "Užsakymo nr.")}${fld("po_line", "Eilutė")}
+      ${fld("ordered_date", "Užsakyta", 'type="date"')}${fld("promised_date", "Tiekėjo patvirtinta data", 'type="date"')}
+      ${fld("need_date", "Reikia iki", 'type="date"')}${fld("location", "Sandėlio vieta")}
+      <label style="grid-column:1/-1">Pastaba<input name="note" value="${esc(v.note || "")}" id="cm-note"></label>
+    </form>
+    <div class="row between"><div class="row"><button id="cm-ok">Įrašyti</button><button class="ghost" id="cm-x">Atšaukti</button></div>
+      ${c && c.qty_received === 0 ? `<button class="ghost" id="cm-cancel">${c.cancelled ? "Grąžinti eilutę" : "Atšaukti eilutę"}</button>` : ""}</div>`, async () => {
+    const loadAsm = async pid => {
+      const p = pid ? await GET(`/api/projects/${pid}`) : { assemblies: [] };
+      $("#cm-assembly_id").innerHTML = `<option value="">Visam projektui</option>` + p.assemblies.map(a => `<option value="${a.id}" ${a.id === v.assembly_id ? "selected" : ""}>${esc(a.code)} ${esc(a.name)}</option>`).join("");
+    };
+    await loadAsm(v.project_id);
+    $("#cm-project_id").onchange = e => { v.assembly_id = null; loadAsm(e.target.value); };
+    $("#cm-x").onclick = closeModal;
+    const cc = $("#cm-cancel");
+    if (cc) cc.onclick = async () => { await act(() => POST(`/api/components/${c.id}/cancel`, { on: !c.cancelled }), "Įrašyta"); closeModal(); after(); };
+    $("#cm-ok").onclick = async () => {
+      const d = formData($("#cm"));
+      d.project_id = +d.project_id; d.assembly_id = d.assembly_id ? +d.assembly_id : null; d.qty = +d.qty;
+      await act(() => c ? PUT(`/api/components/${c.id}`, d) : POST("/api/components", d), "Įrašyta");
+      closeModal(); after();
+    };
+  });
 }
 
 route();

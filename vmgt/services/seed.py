@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import auth, drawings, projects, tasks
+from . import auth, components, drawings, projects, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -23,6 +23,8 @@ USERS = [
     ("technologas", "Ieva Technologė", "technologas", None, []),
     ("meistras", "Andrius Meistras", "meistras", "9999", []),
     ("kokybe", "Laura Kokybė", "kokybe", None, []),
+    ("pirkimai", "Eglė Pirkėja", "pirkimai", None, []),
+    ("sandelis", "Paulius Sandėlis", "sandelis", "5555", []),
     ("op1", "Jonas Petraitis", "operatorius", "1111", []),
     ("op2", "Marius Kazlauskas", "operatorius", "2222", []),
     ("op3", "Darius Suvirintojas", "operatorius", "3333", ["SV-01", "SV-02"]),
@@ -173,6 +175,43 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         at(today - timedelta(hours=2)); tasks.resume(con, op3, r30)
         at(today - timedelta(hours=1, minutes=10)); tasks.start(con, op2, k20)
         at(today - timedelta(minutes=35)); tasks.pause(con, op2, k20, "medziaga", "Trūksta 3 mm lakšto")
+
+        # --- komponentų pirkimai: gauta, dalinai, vėluoja, neužsakyta ---
+        at(today - timedelta(days=14))
+        P = uid["pirkimai"]
+
+        def comp(pid, asm, item, name, spec, qty, unit, sup, po, line, ordered, promised, need):
+            return components.save(con, P, {
+                "project_id": pid, "assembly_id": asm, "item_no": item, "name": name, "spec": spec, "qty": qty,
+                "unit": unit, "supplier": sup, "po_no": po, "po_line": line,
+                "ordered_date": d(ordered) if ordered is not None else None,
+                "promised_date": d(promised) if promised is not None else None,
+                "need_date": d(need) if need is not None else None})
+
+        c_mot = comp(p1, a1["200"], "EL-MOT-075", "Motoreduktorius 0,75 kW", "SEW KA37 DRN80, i=28", 2, "vnt",
+                     "UAB Pavaros (PAVYZDYS)", "PO-26-0412", "1", -14, -3, 4)
+        c_brg = comp(p1, a1["200"], "MECH-UCF205", "Guolių mazgas UCF205", "SKF arba analogas", 8, "vnt",
+                     "UAB Guoliai (PAVYZDYS)", "PO-26-0413", "1", -14, -6, 2)
+        comp(p1, a1["200"], "MECH-BELT-500", "Konvejerio juosta 500 mm", "PVC, žalia, 2 sl., 11,4 m", 2, "vnt",
+             "UAB Juostos (PAVYZDYS)", "PO-26-0414", "1", -12, -1, 5)
+        c_plc = comp(p1, a1["300"], "EL-PLC-1512", "PLC Siemens S7-1500", "CPU 1512C-1 PN", 1, "vnt",
+                     "UAB Automatika (PAVYZDYS)", "PO-26-0420", "1", -13, -4, 3)
+        comp(p1, a1["300"], "EL-HMI-07", "Operatoriaus pultas HMI 7\"", "Siemens TP700 Comfort", 1, "vnt",
+             "UAB Automatika (PAVYZDYS)", "PO-26-0420", "2", -13, 12, 5)
+        c_cnt = comp(p1, a1["300"], "EL-CONT-9A", "Kontaktorius 9 A", "3RT2016, 24 V DC", 12, "vnt",
+                     "UAB Automatika (PAVYZDYS)", "PO-26-0420", "3", -13, -6, 3)
+        comp(p1, a1["300"], "EL-ENC-1000", "Elektros spinta 1000×800×300", "Rittal AX", 1, "vnt",
+             "UAB Spintos (PAVYZDYS)", "PO-26-0425", "1", -10, None, 2)
+        comp(p1, a1["900"], "SNS-IND-M18", "Induktyvus jutiklis M18", "PNP, 8 mm", 10, "vnt",
+             "", "", "", None, None, 6)
+        comp(p2, a2["200"], "ROB-6AX-20", "Pramoninis robotas, 6 ašių", "20 kg, 1800 mm sieksnis", 1, "vnt",
+             "UAB Robotai (PAVYZDYS)", "PO-26-0431", "1", -6, 28, 25)
+        comp(p2, a2["100"], "SAF-DOOR-SW", "Apsauginių durų jungiklis", "su užraktu, PL d", 2, "vnt",
+             "", "", "", None, None, 10)
+        for cid_, q, days in [(c_brg, 8, -6), (c_cnt, 12, -5), (c_mot, 1, -3), (c_plc, 1, -2)]:
+            when = (today + timedelta(days=days)).replace(hour=10, minute=0, second=0)
+            at(when)
+            components.receive(con, uid["sandelis"], cid_, q, when=when.isoformat(timespec="seconds"))
 
         # nauja brėžinio revizija po užduočių sukūrimo – dažymo užduotis bus užrakinta
         at(today - timedelta(hours=5))

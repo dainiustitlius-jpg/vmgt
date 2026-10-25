@@ -82,6 +82,7 @@ const ROUTES = [
   [/^#\/?$/, pageHome],
   [/^#\/p\/(\d+)(?:\/(\w+))?$/, pageProject],
   [/^#\/uzduotys$/, pageMyActions],
+  [/^#\/apkrova$/, pageCapacity],
   [/^#\/m\/(\d+)$/, pageMeeting],
   [/^#\/m\/(naujas)\/(\d+)$/, pageMeetingEdit],
   [/^#\/m\/(\d+)\/keisti$/, pageMeetingEdit],
@@ -118,7 +119,7 @@ function renderNav() {
   if (!S.me) { top.hidden = true; return; }
   top.hidden = false;
   const items = [
-    ["#/", "Projektai", "view"], ["#/uzduotys", "Užduotys", null], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
+    ["#/", "Projektai", "view"], ["#/uzduotys", "Užduotys", null], ["#/apkrova", "Apkrova", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
     ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"],
     ["#/komponentai", "Komponentai", "view"],
     ["#/analitika", "Analitika", "view"], ["#/duomenys", "Duomenys", "tasks"], ["#/admin", "Administravimas", "admin"],
@@ -226,6 +227,8 @@ async function pageProject(pid, tab) {
   const extra = {};
   if (tab === "uzduotys") extra.actions = await GET(`/api/actions?project_id=${pid}`);
   if (tab === "susitikimai") extra.meetings = await GET(`/api/meetings?project_id=${pid}`);
+  if (tab === "planas") extra.depts = await GET("/api/departments");
+  const deptOpts = sel => opt((extra.depts || []).map(d => ({ id: d.id, name: d.name })), sel, "pagal etapą");
   if (tab === "sveikata") extra.soon = (await GET(`/api/actions?project_id=${pid}&status=open`)).filter(x => x.due_date && x.due_date <= addDays(today(), 7));
 
   const body = {
@@ -239,18 +242,23 @@ async function pageProject(pid, tab) {
   <div class="card"><div class="row between"><h2>Etapų planas</h2><span class="muted">${p.phases_done} iš ${p.phases_total} baigta</span></div>
     ${gantt(p.phases, asmName)}</div>
   <div class="card"><h2>Etapai ir atsakingieji</h2>
-    <div class="tbl"><table><thead><tr><th>Mazgas</th><th>Etapas</th><th>Atsakingas</th><th>Planas</th><th>Faktas</th><th>Būsena</th></tr></thead>
+    <p class="muted">Planuojamos valandos naudojamos resursų apkrovai. Gamybos etapui nurodykite barą – jo valandos skaičiuojamos, kol mazgui nėra cecho operacijų (tada naudojamos jų normos).</p>
+    <div class="tbl"><table><thead><tr><th>Mazgas</th><th>Etapas</th><th>Atsakingas</th><th>Planas</th><th>Val.</th><th>Departamentas</th><th>Faktas</th><th>Būsena</th></tr></thead>
     <tbody>${p.phases.map(ph => `<tr>
       <td>${esc(asmName(ph.assembly_id))}</td><td>${esc(ph.kind_label)}</td>
       <td>${ed ? `<select data-ph="${ph.id}" data-f="owner_id" id="ph-o-${ph.id}">${opt(active, ph.owner_id, "—")}</select>` : esc(ph.owner_name || "—")}</td>
       <td class="num">${ed ? `<input type="date" data-ph="${ph.id}" data-f="plan_start" value="${esc(ph.plan_start || "")}" id="ph-s-${ph.id}"> – <input type="date" data-ph="${ph.id}" data-f="plan_end" value="${esc(ph.plan_end || "")}" id="ph-e-${ph.id}">` : `${esc(ph.plan_start || "—")} – ${esc(ph.plan_end || "—")}`}</td>
+      <td>${ed ? `<input type="number" min="0" step="1" data-ph="${ph.id}" data-f="hours" value="${ph.hours ?? ""}" style="width:80px" id="ph-h-${ph.id}">` : (ph.hours ?? "—")}</td>
+      <td>${ed ? `<select data-ph="${ph.id}" data-f="department_id" id="ph-d-${ph.id}">${deptOpts(ph.department_id)}</select>` : esc(ph.department_name || "pagal etapą")}</td>
       <td class="num muted">${ph.actual_start ? dt(ph.actual_start) : "—"} – ${ph.actual_end ? dt(ph.actual_end) : ""}</td>
-      <td>${pill(ph.status, ph.status)} ${ed ? phaseBtns(ph) : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Etapų dar nėra.</td></tr>`}</tbody></table></div>
+      <td>${pill(ph.status, ph.status)} ${ed ? phaseBtns(ph) : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">Etapų dar nėra.</td></tr>`}</tbody></table></div>
     ${ed ? `<form id="newph" class="inline">
       <label>Mazgas<select name="assembly_id" id="nph-a">${opt(p.assemblies.map(a => ({ id: a.id, name: `${a.code} ${a.name}` })), "", "Visas projektas")}</select></label>
       <label>Etapas<select name="kind" id="nph-k">${opt(S.meta.phase_kinds)}</select></label>
       <label>Atsakingas<select name="owner_id" id="nph-o">${opt(active, "", "—")}</select></label>
       <label>Pradžia<input type="date" name="plan_start" id="nph-s"></label><label>Pabaiga<input type="date" name="plan_end" id="nph-e"></label>
+      <label>Valandos<input type="number" min="0" name="hours" style="width:90px" id="nph-h"></label>
+      <label>Departamentas<select name="department_id" id="nph-d">${deptOpts("")}</select></label>
       <button class="ghost">Pridėti etapą</button></form>` : ""}</div>`,
     uzduotys: () => `<div class="card">${actionForm(p, active)}</div><div id="board"></div>`,
     susitikimai: () => `<div class="row between"><h2>Susitikimų protokolai</h2>${can("meetings") ? `<a class="btn" href="#/m/naujas/${p.id}">+ Naujas protokolas</a>` : ""}</div>
@@ -308,7 +316,8 @@ async function pageProject(pid, tab) {
   };
   $$("[data-ph][data-f]").forEach(el => el.onchange = async () => {
     const v = el.value || null;
-    await act(() => PUT(`/api/phases/${el.dataset.ph}`, { [el.dataset.f]: el.dataset.f === "owner_id" ? (v ? +v : null) : v }), "Įrašyta");
+    const f = el.dataset.f;
+    await act(() => PUT(`/api/phases/${el.dataset.ph}`, { [f]: ["owner_id", "department_id", "hours"].includes(f) ? (v ? +v : null) : v }), "Įrašyta");
     reload();
   });
   $$("[data-phs]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/phases/${b.dataset.id}/status`, { status: b.dataset.phs })); reload(); });
@@ -317,6 +326,7 @@ async function pageProject(pid, tab) {
     e.preventDefault(); const d = formData(nph);
     d.assembly_id = d.assembly_id ? +d.assembly_id : null; d.owner_id = d.owner_id ? +d.owner_id : null;
     d.plan_start = d.plan_start || null; d.plan_end = d.plan_end || null;
+    d.hours = d.hours ? +d.hours : null; d.department_id = d.department_id ? +d.department_id : null;
     await act(() => POST(`/api/projects/${pid}/phases`, d), "Etapas pridėtas"); reload();
   };
   const na = $("#newa");
@@ -1100,6 +1110,111 @@ function compForm(c, projects, after, defProject) {
       closeModal(); after();
     };
   });
+}
+
+// ---------- resursų apkrova ----------
+const PROJ_COLORS = ["#2e6db4", "#c0762a", "#4f8a3c", "#8a6bbf", "#2f8f9d", "#a5542f", "#6b7d2f", "#b04a7a"];
+const utilCls = u => u == null ? "u0" : u > 1 ? "u4" : u > 0.85 ? "u3" : u > 0.6 ? "u2" : u > 0 ? "u1" : "u0";
+
+async function pageCapacity() {
+  let st = { weeks: 12, basket: true, open: null };
+  try { st = { ...st, ...JSON.parse(sessionStorage.getItem("pf.cap") || "{}") }; } catch {}
+  const save = () => { try { sessionStorage.setItem("pf.cap", JSON.stringify(st)); } catch {} };
+  const draw = async () => {
+    const r = await GET(`/api/capacity?weeks=${st.weeks}&basket=${st.basket ? 1 : 0}`);
+    const colorOf = {}; let ci = 0;
+    r.departments.forEach(d => d.cells.forEach(c => c.projects.forEach(p => { if (!(p.code in colorOf)) colorOf[p.code] = PROJ_COLORS[ci++ % PROJ_COLORS.length]; })));
+    const now = r.shortages.filter(s => !s.basket_only), withBasket = r.shortages.filter(s => s.basket_only);
+    const worst = [...r.shortages].sort((a, b) => b.shortage - a.shortage)[0];
+    const groups = [["office", "Biuro skyriai"], ["production", "Gamybos barai"]];
+    const wk = w => r.weeks.find(x => x.start === w)?.label || w;
+    app().innerHTML = `<div class="row between"><h1>Resursų apkrova</h1>
+      <form id="capf" class="inline"><label>Laikotarpis<select id="cap-w">${[8, 12, 26].map(n => `<option value="${n}" ${n === st.weeks ? "selected" : ""}>${n} sav.</option>`).join("")}</select></label>
+        <label class="row" style="display:flex"><input type="checkbox" id="cap-b" ${st.basket ? "checked" : ""}> įtraukti krepšelio projektus</label></form></div>
+    <div class="tiles">
+      <div class="tile"><span class="muted">Vykdomi projektai</span><b>${r.projects_active}</b></div>
+      <div class="tile"><span class="muted">Krepšelyje (nepradėti)</span><b>${r.projects_basket}</b></div>
+      <div class="tile"><span class="muted">Trūksta jau dabar</span><b class="${now.length ? "s-late" : ""}">${now.length}</b><span class="muted">savaičių departamentuose</span></div>
+      <div class="tile"><span class="muted">Trūktų priėmus krepšelį</span><b class="${withBasket.length ? "warn" : ""}">${withBasket.length}</b><span class="muted">savaičių departamentuose</span></div>
+      <div class="tile"><span class="muted">Didžiausias trūkumas</span><b>${worst ? `${worst.shortage} val.` : "—"}</b><span class="muted">${worst ? `${esc(worst.code)} · ${wk(worst.week)}` : ""}</span></div>
+    </div>
+    <div class="card"><div class="row between"><h2>Departamentų apkrova savaitėmis</h2>
+      <div class="legend"><span><i class="cl u1"></i>iki 60 %</span><span><i class="cl u2"></i>60–85 %</span><span><i class="cl u3"></i>85–100 %</span><span><i class="cl u4"></i>trūksta (&gt;100 %)</span></div></div>
+      <p class="muted">Langelyje – apkrova procentais nuo pajėgumo${st.basket ? ", po ja – kiek valandų sudaro krepšelio projektai" : ""}. Spauskite eilutę – matysite, kurie projektai apkrauna.</p>
+      <div class="tbl"><table class="heat"><thead><tr><th>Departamentas</th><th>Pajėgumas / sav.</th>${r.weeks.map(w => `<th class="wk" title="${w.start}">${w.label}<br><span class="muted">${w.start.slice(5)}</span></th>`).join("")}<th>Laisva, val.</th></tr></thead>
+      <tbody>${groups.map(([k, label]) => {
+        const ds = r.departments.filter(d => d.kind === k);
+        return ds.length ? `<tr class="grp"><td colspan="${r.weeks.length + 3}">${label}</td></tr>` + ds.map(d => `
+        <tr class="click ${st.open === d.code ? "sel" : ""}" data-dep="${esc(d.code)}"><td><b>${esc(d.name)}</b><br><span class="muted">${d.headcount} žm. × ${d.hours_per_week} h × ${Math.round(100 * d.availability)} %</span></td>
+          <td class="num">${d.capacity_week} h</td>
+          ${d.cells.map(c => {
+            const tot = c.committed + (st.basket ? c.basket : 0);
+            const tip = `${wk(c.week)}: poreikis ${Math.round(tot)} h iš ${c.capacity} h` + (c.projects.length ? "\n" + c.projects.map(p => `${p.code}${p.basket ? " (krepšelis)" : ""}: ${p.hours} h`).join("\n") : "") + (c.shortage ? `\nTrūksta ${c.shortage} h` : "");
+            return `<td class="hc ${utilCls(tot ? c.util : 0)}" title="${esc(tip)}">${tot ? `${Math.round(100 * c.util)}%` : ""}${st.basket && c.basket ? `<small>+${Math.round(c.basket)} kr.</small>` : ""}</td>`;
+          }).join("")}
+          <td class="num">${Math.round(d.free_hours)}</td></tr>
+        ${st.open === d.code ? `<tr class="detail"><td colspan="${r.weeks.length + 3}">${depChart(d, r, colorOf)}</td></tr>` : ""}`).join("") : "";
+      }).join("")}</tbody></table></div></div>
+    <div class="grid2">
+      <div class="card"><h2>Kur trūksta resurso</h2>${r.shortages.length ? simple(r.shortages, ["Savaitė", "Departamentas", "Poreikis", "Pajėgumas", "Trūksta", "≈ žmonių", "Daugiausia apkrauna"], s => [
+        wk(s.week), esc(s.department) + (s.basket_only ? ' <span class="warn">tik priėmus krepšelį</span>' : ""), `${s.demand} h`, `${s.capacity} h`,
+        `<b class="s-late">${s.shortage} h</b>`, s.people ?? "—", s.projects.map(p => `${esc(p.code)} ${p.hours} h`).join(", ")]) : `<p class="muted">Per pasirinktą laikotarpį resurso užtenka visur.</p>`}</div>
+      <div class="card"><h2>Ar galima prisiimti krepšelio projektus</h2>
+        <p class="muted">Tikrinama kiekviena savaitė: vykdomi projektai + šis projektas turi tilpti į pajėgumą.</p>
+        ${r.basket_fit.length ? r.basket_fit.map(f => `<div class="fit">
+          <div class="row between"><b>${esc(f.code)} ${esc(f.name)}</b>${f.fits === null ? '<span class="muted">nėra valandų</span>' : f.fits ? pill("baigta", "telpa") : pill("atvira", "netelpa")}</div>
+          ${f.needs.filter(n => !n.ok).map(n => `<div class="lock">${esc(n.name)}: trūktų ${n.over} h (blogiausia ${wk(n.worst_week)})</div>`).join("")}
+          <div class="muted">Poreikis: ${f.needs.map(n => `${esc(n.code)} ${n.hours} h`).join(", ") || "—"}</div></div>`).join("") : `<p class="muted">Krepšelyje projektų nėra.</p>`}</div>
+    </div>
+    ${r.unassigned.length ? `<div class="card"><h2>Ko trūksta tiksliam skaičiavimui</h2>${simple(r.unassigned, ["Projektas", "Kas", "Trūksta"], u => [
+      `<a href="#/p/${u.project_id}/planas">${esc(u.project)}</a>`, esc(u.what), esc(u.why)])}</div>` : ""}
+    ${r.notes.length ? `<div class="card"><h2>Prielaidos</h2><ul>${r.notes.map(n => `<li class="muted">${esc(n)}</li>`).join("")}</ul></div>` : ""}
+    ${can("projects") ? `<div class="card"><h2>Departamentų pajėgumas</h2><p class="muted">Pajėgumas per savaitę = žmonės × valandos × prieinamumas (dalis laiko projektams, be atostogų, ligų ir kitų darbų).</p><div id="deps"></div></div>` : ""}`;
+    $("#cap-w").onchange = e => { st.weeks = +e.target.value; save(); draw(); };
+    $("#cap-b").onchange = e => { st.basket = e.target.checked; save(); draw(); };
+    $$("tr[data-dep]").forEach(tr => tr.onclick = () => { st.open = st.open === tr.dataset.dep ? null : tr.dataset.dep; save(); draw(); });
+    if (can("projects")) {
+      const deps = await GET("/api/departments");
+      $("#deps").innerHTML = `<div class="tbl"><table><thead><tr><th>Departamentas</th><th>Žmonės</th><th>Val. / sav.</th><th>Prieinamumas, %</th><th>Pajėgumas</th><th>Etapai</th></tr></thead><tbody>
+        ${deps.map(d => `<tr><td>${esc(d.name)} <span class="muted mono">${esc(d.code)}</span></td>
+          <td><input type="number" min="0" step="0.5" value="${d.headcount}" data-dp="${d.id}" data-f="headcount" style="width:70px" id="dp-h-${d.id}"></td>
+          <td><input type="number" min="0" value="${d.hours_per_week}" data-dp="${d.id}" data-f="hours_per_week" style="width:70px" id="dp-w-${d.id}"></td>
+          <td><input type="number" min="0" max="100" value="${Math.round(100 * d.availability)}" data-dp="${d.id}" data-f="availability" style="width:70px" id="dp-a-${d.id}"></td>
+          <td class="num">${d.capacity_week} h</td><td class="muted">${d.kind === "production" ? "cecho operacijos, gamybos etapai" : esc(d.phase_kind_list.join(", "))}</td></tr>`).join("")}</tbody></table></div>`;
+      $$("[data-dp]").forEach(el => el.onchange = async () => {
+        const v = +el.value; await act(() => PUT(`/api/departments/${el.dataset.dp}`, { [el.dataset.f]: el.dataset.f === "availability" ? v / 100 : v }), "Įrašyta"); draw();
+      });
+    }
+  };
+  await draw();
+}
+
+function depChart(d, r, colorOf) {
+  // stulpelinė diagrama: savaitės poreikis pagal projektus + pajėgumo linija
+  const W = Math.max(560, r.weeks.length * 56), H = 220, pad = { l: 44, r: 10, t: 14, b: 40 };
+  const bw = (W - pad.l - pad.r) / r.weeks.length;
+  const max = Math.max(d.capacity_week * 1.15, ...d.cells.map(c => c.committed + c.basket)) || 1;
+  const y = v => pad.t + (H - pad.t - pad.b) * (1 - v / max);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(max * f));
+  let bars = "";
+  d.cells.forEach((c, i) => {
+    let acc = 0;
+    c.projects.forEach(p => {
+      if (p.basket && !r.include_basket) return;
+      const y1 = y(acc + p.hours), y0 = y(acc);
+      bars += `<rect x="${pad.l + i * bw + 6}" y="${y1}" width="${bw - 12}" height="${Math.max(0, y0 - y1)}" fill="${colorOf[p.code]}" ${p.basket ? 'fill-opacity="0.45" stroke="' + colorOf[p.code] + '" stroke-dasharray="3 2"' : ""}><title>${esc(p.code)}${p.basket ? " (krepšelis)" : ""}: ${p.hours} h</title></rect>`;
+      acc += p.hours;
+    });
+  });
+  const projs = [...new Map(d.cells.flatMap(c => c.projects).map(p => [p.code, p])).values()];
+  return `<div class="chartwrap"><svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:${Math.min(W, 560)}px" class="chart" role="img" aria-label="${esc(d.name)} apkrova">
+    ${ticks.map(t => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}" class="grid"/><text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end" class="ax">${t}</text>`).join("")}
+    ${bars}
+    <line x1="${pad.l}" x2="${W - pad.r}" y1="${y(d.capacity_week)}" y2="${y(d.capacity_week)}" class="capline"/>
+    <text x="${W - pad.r}" y="${y(d.capacity_week) - 5}" text-anchor="end" class="caplbl">pajėgumas ${d.capacity_week} h</text>
+    ${r.weeks.map((w, i) => `<text x="${pad.l + i * bw + bw / 2}" y="${H - pad.b + 16}" text-anchor="middle" class="ax">${w.label}</text>`).join("")}
+  </svg></div>
+  <div class="legend">${projs.map(p => `<span><i style="background:${colorOf[p.code]};${p.basket ? "opacity:.5" : ""}"></i>${esc(p.code)}${p.basket ? " (krepšelis)" : ""}</span>`).join("")}</div>`;
 }
 
 route();

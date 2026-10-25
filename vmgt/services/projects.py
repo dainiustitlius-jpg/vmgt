@@ -161,8 +161,10 @@ def _codes(v) -> str:
 
 def list_phases(con, project_id) -> list[dict]:
     out = db.rows(con.execute(
-        "SELECT ph.*, a.code AS assembly_code, a.name AS assembly_name, u.name AS owner_name "
+        "SELECT ph.*, a.code AS assembly_code, a.name AS assembly_name, u.name AS owner_name, "
+        "d.code AS department_code, d.name AS department_name "
         "FROM phases ph LEFT JOIN assemblies a ON a.id=ph.assembly_id LEFT JOIN users u ON u.id=ph.owner_id "
+        "LEFT JOIN departments d ON d.id=ph.department_id "
         "WHERE ph.project_id=? ORDER BY COALESCE(a.sort, 9999), ph.sort, ph.id", (project_id,)))
     for x in out:
         x["kind_label"] = PHASE_LABEL.get(x["kind"], x["kind"])
@@ -175,13 +177,18 @@ def save_phase(con, by, project_id, data: dict, phase_id=None) -> int:
             raise RuleError("Nežinomas etapo tipas")
         sort = [k for k, _ in PHASE_KINDS].index(data["kind"])
         cur = con.execute(
-            "INSERT INTO phases (project_id, assembly_id, kind, owner_id, plan_start, plan_end, sort) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO phases (project_id, assembly_id, kind, owner_id, plan_start, plan_end, sort, hours, department_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (project_id, data.get("assembly_id"), data["kind"], data.get("owner_id"),
-             data.get("plan_start"), data.get("plan_end"), sort))
+             data.get("plan_start"), data.get("plan_end"), sort, _hours(data.get("hours")),
+             data.get("department_id") or None))
         db.log_event(con, by, "phase", cur.lastrowid, "create", data)
         return cur.lastrowid
     vals = {k: data[k] for k in ("owner_id", "plan_start", "plan_end") if k in data}
+    if "hours" in data:
+        vals["hours"] = _hours(data["hours"])
+    if "department_id" in data:
+        vals["department_id"] = data["department_id"] or None
     if vals.get("plan_start") and vals.get("plan_end") and vals["plan_end"] < vals["plan_start"]:
         raise RuleError("Etapo pabaiga ankstesnė už pradžią")
     if vals:
@@ -189,6 +196,15 @@ def save_phase(con, by, project_id, data: dict, phase_id=None) -> int:
                     (*vals.values(), phase_id))
         db.log_event(con, by, "phase", phase_id, "update", vals)
     return phase_id
+
+
+def _hours(v):
+    if v in (None, ""):
+        return None
+    h = float(v)
+    if h < 0:
+        raise RuleError("Valandos negali būti neigiamos")
+    return h
 
 
 def set_phase_status(con, by, phase_id, status) -> None:

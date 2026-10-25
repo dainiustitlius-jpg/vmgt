@@ -51,6 +51,7 @@ rodyti. Visų pavyzdinių vartotojų slaptažodis `vmgt2026` (tik testams):
 | `services/actions.py` | Projekto komandos užduotys: statusai, leistini perėjimai, istorija |
 | `services/meetings.py` | Susitikimų protokolai (MoM): veiksmai → užduotys, patvirtinimas |
 | `services/health.py` | Projekto sveikata realiu laiku: 4 sritys, lygiai, priežastys |
+| `services/capacity.py` | Resursų apkrova: departamentų poreikis prieš pajėgumą savaitėmis, trūkumai, krepšelio projektų tilpimas |
 | `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
 | `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
 | `vmgt/web/static/` | `index.html`, `app.js` (hash maršrutai), `app.css` – be surinkimo įrankio |
@@ -87,6 +88,28 @@ kiti → gamyba) ir projektą perkelia iš krepšelio į vykdomus.
 sumą, o atvirą naršyklė prideda pati kas sekundę. Iki 2026-10-24 terminalas
 gaudavo sumą su atviru intervalu ir jį pridėdavo dar kartą (8:02 vietoj
 6:00). `test_terminalo_laikas_be_atviro_intervalo`.
+
+## Resursų apkrova (nuo 2026-10-25)
+
+Vartotojo tikslas: matyti, kiek projektų vykdoma, kiek dar galima prisiimti ir
+kur trūksta žmonių. Sprendimai (2026-10-25): departamentai – **biuro skyriai
+ir gamybos barai**; poreikis – **etapų planuojamos valandos + cecho normos**;
+žingsnis – **savaitė**. Langas „Apkrova“ (`#/apkrova`).
+
+| | |
+|---|---|
+| departamentai | `departments` (migracija 6): biuro skyrius – `phase_kinds` (kurių etapų darbas: projektavimas, technologija, komponentai, programavimas, testavimas); gamybos baras – `area_id` |
+| pajėgumas | žmonės × val. per savaitę × prieinamumas (numatyta 85 % – atostogos, ligos, kiti darbai); keičiama lange (teisė `projects`) |
+| biuro poreikis | etapo `hours` tolygiai per etapo darbo dienas (`spread`); etapas gali turėti `department_id`, kitaip – pagal `phase_kinds` |
+| gamybos poreikis | likusios cecho operacijų normos (norma × likęs kiekis) per mazgo gamybos / surinkimo etapo likusias dienas; etapas praėjęs ar jo nėra – likutis į šią savaitę. Kol etapo apimtyje NĖRA operacijų – etapo `hours` su nurodytu baru (įvertis krepšelio projektui); atsiradus operacijoms įvertis nebeskaičiuojamas (dvigubai negali) |
+| prielaidos | nepradėtas etapas, kurio pradžia praėjo, perkeliamas į šiandien tiek pat DARBO dienų; vykdomo etapo praeitis laikoma atlikta; vėluojančio vykdomo – tempas tęsiamas savaitę (kad vėlavimas nedingtų); savaitgalį grafikas prasideda nuo kitos savaitės |
+| krepšelis | krepšelio projektų valandos rodomos atskirai (jungiklis); trūkumas žymimas „tik priėmus krepšelį“, jei vykdomi patys telpa |
+| ar telpa | krepšelio projektas tikrinamas **kiekvieną savaitę**: vykdomi + jis ≤ pajėgumas; sumomis per laikotarpį lyginti negalima (700 val. „tilptų“ į 12 sav., nors suplanuota per 2) |
+| duomenų spragos | etapai be valandų, be datų, gamybos etapas be baro – sąrašas „Ko trūksta tiksliam skaičiavimui“ su nuoroda į projekto planą |
+
+Projekto „Planas“ kortelėje – stulpeliai „Val.“ ir „Departamentas“.
+`test_apkrova.py`. Rasta testu: perkeliant nepradėtą etapą kalendorinėmis
+dienomis savaitgalis „suvalgydavo“ valandas (50 → 30).
 
 ## Projekto valdymas (nuo 2026-10-25)
 
@@ -205,6 +228,11 @@ kategoriją.
 - MS SQL – schema paprasta, kad perkelti būtų nesunku.
 
 ## UI pastaba
+
+`.card > *, main > * { min-width: 0 }` – tinklelio vaikas be šito išsiplečia
+pagal plačią lentelę ir telefone puslapis tampa platesnis už ekraną (rasta
+2026-10-25: departamentų lentelė, 716 px).
+
 
 `[hidden] { display: none !important; }` būtina: be jos `#modal`
 `display: grid` nugalėdavo `hidden` atributą, ir paslėptas langas dengė visus

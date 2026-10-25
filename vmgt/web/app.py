@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import config as cfgmod
 from .. import db
-from ..services import (NotFound, RuleError, actions, analytics, auth, components, drawings, health, importer,
-                        meetings, ncr, projects, seed, tasks)
+from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
+                        importer, meetings, ncr, projects, seed, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -293,6 +293,25 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.post("/api/ncr/{nid}/close")
     def ncr_close(nid: int, body: dict, user=Depends(need("ncr_manage")), con=Depends(get_con)):
         ncr.close(con, user, nid, body.get("resolution", ""))
+        return {"ok": True}
+
+    # ---------- resursų apkrova ----------
+
+    @app.get("/api/capacity")
+    def capacity_report(weeks: int = 12, basket: int = 1, user=Depends(need("view")), con=Depends(get_con)):
+        return capacity.report(con, max(4, min(weeks, 52)), bool(basket))
+
+    @app.get("/api/departments")
+    def dept_list(user=Depends(need("view")), con=Depends(get_con)):
+        return capacity.list_departments(con)
+
+    @app.post("/api/departments")
+    def dept_new(body: dict, user=Depends(need("projects")), con=Depends(get_con)):
+        return {"id": capacity.save_department(con, user["id"], body)}
+
+    @app.put("/api/departments/{did}")
+    def dept_put(did: int, body: dict, user=Depends(need("projects")), con=Depends(get_con)):
+        capacity.save_department(con, user["id"], body, did)
         return {"ok": True}
 
     # ---------- projekto komandos užduotys ----------

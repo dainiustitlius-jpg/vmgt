@@ -294,6 +294,25 @@ MIGRATIONS: list[str] = [
         text TEXT NOT NULL DEFAULT ''
     );
     """,
+    # 6 – resursų apkrova: departamentai (biuro skyriai ir gamybos barai),
+    # etapų planuojamos valandos
+    """
+    CREATE TABLE departments (
+        id INTEGER PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'office',        -- office / production
+        area_id INTEGER REFERENCES areas(id),       -- gamybos barui
+        phase_kinds TEXT NOT NULL DEFAULT '',       -- biuro skyriui: kurių etapų darbas
+        headcount REAL NOT NULL DEFAULT 1,          -- žmonių skaičius
+        hours_per_week REAL NOT NULL DEFAULT 40,    -- vienam žmogui
+        availability REAL NOT NULL DEFAULT 0.85,    -- dalis laiko projektams (be atostogų, ligų, kitų darbų)
+        sort INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1
+    );
+    ALTER TABLE phases ADD COLUMN hours REAL;
+    ALTER TABLE phases ADD COLUMN department_id INTEGER REFERENCES departments(id);
+    """,
 ]
 
 

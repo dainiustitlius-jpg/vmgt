@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import actions, auth, components, drawings, meetings, projects, tasks
+from . import actions, auth, capacity, components, drawings, meetings, projects, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -79,8 +79,19 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         for login, name, role, pin, centres in USERS:
             uid[login] = auth.create_user(con, login, name, role, TEST_PASSWORD, pin=pin, centres=centres)
         cid = {}
+        # biuro skyriai: kurių etapų darbą dirba ir kiek žmonių (pavyzdiniai skaičiai)
+        for code, name, kinds, people in [("PROJ", "Projektavimo skyrius", "projektavimas", 3),
+                                          ("TECH", "Technologijų skyrius", "technologija", 2),
+                                          ("PIRK", "Pirkimų skyrius", "komponentai", 1),
+                                          ("PROG", "Automatikos ir programavimo skyrius", "programavimas", 2),
+                                          ("TEST", "Testavimo grupė", "testavimas", 1)]:
+            capacity.save_department(con, None, {"code": code, "name": name, "kind": "office",
+                                                 "phase_kinds": kinds, "headcount": people})
+        area_people = {"MAB": 4, "TKB": 3, "SVB": 8, "DZB": 3, "ATB": 3, "TIS": 4}
         for acode, aname, master, centres in AREAS:
             aid = projects.save_area(con, None, {"code": acode, "name": aname, "master_id": uid[master]})
+            capacity.save_department(con, None, {"code": acode, "name": aname, "kind": "production", "area_id": aid,
+                                                 "headcount": area_people[acode]})
             for code, name, kind, manual in centres:
                 cid[code] = projects.save_centre(con, None, {"code": code, "name": name, "kind": kind,
                                                              "manual": manual, "area_id": aid})
@@ -105,9 +116,12 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
                                                                              "requires": req[0] if req else ""})
             return pid, ids
 
-        def phase(pid, asm, kind, owner, s, e):
-            return projects.save_phase(con, uid["admin"], pid, {"assembly_id": asm, "kind": kind,
-                                                                "owner_id": uid[owner], "plan_start": d(s), "plan_end": d(e)})
+        dept = {r["code"]: r["id"] for r in capacity.list_departments(con)}
+
+        def phase(pid, asm, kind, owner, s, e, hours=None, dep=None):
+            return projects.save_phase(con, uid["admin"], pid, {"assembly_id": asm, "kind": kind, "owner_id": uid[owner],
+                                                                "plan_start": d(s), "plan_end": d(e), "hours": hours,
+                                                                "department_id": dept[dep] if dep else None})
 
         def task(pid, asm, centre, seq, name, qty=1, norm=0, drw="", rev=""):
             return tasks.create_task(con, uid["admin"], {
@@ -119,17 +133,17 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
                          [("100", "Rėmas", 1), ("200", "Konvejeris", 2), ("300", "Elektros spinta", 1),
                           ("900", "Galutinis surinkimas", 1, "100,200,300")])
         ph = {}
-        ph["p100"] = phase(p1, a1["100"], "projektavimas", "vadovas", -18, -12)
-        ph["t100"] = phase(p1, a1["100"], "technologija", "technologas", -12, -9)
+        ph["p100"] = phase(p1, a1["100"], "projektavimas", "vadovas", -18, -12, 80)
+        ph["t100"] = phase(p1, a1["100"], "technologija", "technologas", -12, -9, 24)
         phase(p1, a1["100"], "gamyba", "meistras", -6, 4)
-        ph["p200"] = phase(p1, a1["200"], "projektavimas", "vadovas", -16, -8)
-        phase(p1, a1["200"], "komponentai", "planuotojas", -8, 6)
+        ph["p200"] = phase(p1, a1["200"], "projektavimas", "vadovas", -16, -8, 120)
+        phase(p1, a1["200"], "komponentai", "planuotojas", -8, 6, 30)
         phase(p1, a1["200"], "gamyba", "meistras", -3, 8)
-        ph["p300"] = phase(p1, a1["300"], "projektavimas", "vadovas", -15, -6)
-        phase(p1, a1["300"], "komponentai", "planuotojas", -6, 10)
+        ph["p300"] = phase(p1, a1["300"], "projektavimas", "vadovas", -15, -6, 90)
+        phase(p1, a1["300"], "komponentai", "planuotojas", -6, 10, 24)
         phase(p1, None, "surinkimas", "meistras", 9, 18)
-        phase(p1, None, "programavimas", "vadovas", 6, 20)
-        phase(p1, None, "testavimas", "kokybe", 20, 26)
+        phase(p1, None, "programavimas", "vadovas", 6, 20, 160)
+        phase(p1, None, "testavimas", "kokybe", 20, 26, 60)
 
         r10 = task(p1, a1["100"], "LAZ-01", 10, "Lakštų detalių pjovimas", 1, 45, "1023-100", "A")
         r20 = task(p1, a1["100"], "LNK-01", 20, "Lenkimas", 1, 60, "1023-100", "A")
@@ -150,12 +164,14 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         # --- P-24121: dar neprasidėjęs gamyboje, eilė DAZ-01 nepatvirtinta ---
         p2, a2 = project("P-24121", "Suvirinimo robotų celė RC-3", "AB Pavyzdys LT", d(55), 2, "vadovas",
                          [("100", "Apsauginė tvora", 6), ("200", "Pozicionierius", 1)])
-        phase(p2, a2["100"], "projektavimas", "vadovas", -10, -2)
+        phase(p2, a2["100"], "projektavimas", "vadovas", -10, -2, 60)
         phase(p2, a2["100"], "gamyba", "meistras", 2, 14)
-        phase(p2, a2["200"], "projektavimas", "vadovas", -6, 5)
-        phase(p2, a2["200"], "komponentai", "planuotojas", 5, 25)
-        phase(p2, None, "programavimas", "vadovas", 20, 40)
-        phase(p2, None, "testavimas", "kokybe", 40, 48)
+        phase(p2, a2["200"], "projektavimas", "vadovas", -6, 5, 220)
+        phase(p2, a2["200"], "komponentai", "planuotojas", 5, 25, 40)
+        phase(p2, a2["200"], "gamyba", "meistras", 18, 32, 320, "SVB")
+        phase(p2, None, "surinkimas", "meistras", 30, 40, 260, "TIS")
+        phase(p2, None, "programavimas", "vadovas", 20, 40, 300)
+        phase(p2, None, "testavimas", "kokybe", 40, 48, 80)
         task(p2, a2["100"], "PLZ-01", 10, "Tvoros stulpų pjovimas", 6, 15, "2210-100", "B")
         task(p2, a2["100"], "SV-02", 20, "Tvoros sekcijų suvirinimas", 6, 70, "2210-100", "B")
         task(p2, a2["100"], "DAZ-01", 30, "Dažymas RAL 1023", 6, 30, "2210-100", "B")
@@ -163,8 +179,10 @@ def seed(con, files_dir: Path, today: datetime | None = None) -> None:
         # --- P-24130: tik krepšelyje ---
         p3, a3 = project("P-24130", "Talpų stovai TS-8", "UAB Pavyzdys", d(80), 3, "vadovas",
                          [("100", "Stovas", 8)])
-        phase(p3, a3["100"], "projektavimas", "vadovas", 3, 15)
-        phase(p3, a3["100"], "gamyba", "meistras", 20, 35)
+        phase(p3, a3["100"], "projektavimas", "vadovas", 3, 15, 180)
+        phase(p3, a3["100"], "technologija", "technologas", 14, 20, 60)
+        phase(p3, a3["100"], "gamyba", "meistras", 20, 35, 700, "SVB")
+        phase(p3, a3["100"], "gamyba", "meistras", 33, 40, 160, "DZB")
 
         for code, c in cid.items():
             if code != "DAZ-01":

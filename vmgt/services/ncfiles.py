@@ -134,7 +134,12 @@ def pending_ack(con, task_id) -> list[dict]:
 
 
 def ack(con, user, task_id) -> int:
-    """Meistras patvirtina naujus operacijos failus."""
+    """Meistras patvirtina naujus operacijos failus (savo baruose)."""
+    from .auth import require_at
+    t = db.row(con.execute("SELECT c.code, ar.code AS area FROM tasks t JOIN work_centres c ON c.id=t.centre_id "
+                           "LEFT JOIN areas ar ON ar.id=c.area_id WHERE t.id=?", (task_id,)))
+    if t:
+        require_at(user, "ack_rev", t["code"], t["area"])
     n = con.execute("UPDATE task_files SET needs_ack=0, acked_by=?, acked_at=? WHERE task_id=? AND current=1 "
                     "AND needs_ack=1", (user["id"], db.now(), task_id)).rowcount
     if not n:

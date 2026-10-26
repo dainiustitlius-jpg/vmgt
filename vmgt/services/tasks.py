@@ -333,7 +333,9 @@ def stop(con, user, task_id, good: int, scrap: int = 0, finish: bool | None = No
 
 
 def ack_revision(con, user, task_id) -> None:
+    from .auth import require_at
     t = _task(con, task_id)
+    require_at(user, "ack_rev", t["centre_code"], t["area_code"])       # meistras – savo baruose
     cur = current_revision(con, t["drawing_no"])
     if not cur or cur == t["drawing_rev"]:
         raise RuleError("Revizija nepasikeitė")

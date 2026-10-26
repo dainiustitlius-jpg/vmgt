@@ -522,3 +522,58 @@ table.tedit td.mono, table.tedit td .mono { white-space: nowrap; }
 .fc.off .fcr { fill: var(--thead); stroke-dasharray: 0.5 0.4; }
 .fc.off text { opacity: .7; }
 .lg.off { background: var(--thead); border: 1px dashed var(--muted); }
+
+/* moduliai: viršuje – modulių meniu su ženklais, po juo – aktyvaus modulio skyriai */
+nav a { padding: 6px 7px; }
+#who { display: grid; line-height: 1.2; } #who small { opacity: .7; font-size: 11.5px; }
+nav a .nico { width: 15px; height: 15px; vertical-align: -2px; margin-right: 5px; opacity: .8; }
+.subnav { display: flex; gap: 2px; flex-wrap: wrap; padding: 0 16px; background: color-mix(in srgb, var(--head) 88%, #fff 12%);
+  border-top: 1px solid rgba(255,255,255,.06); }
+.subnav a { color: var(--head-fg); opacity: .75; text-decoration: none; padding: 7px 12px; font-size: 13.5px; }
+.subnav a:hover { opacity: 1; }
+.subnav a.on { opacity: 1; box-shadow: inset 0 -2px 0 var(--signal); }
+/* pradžios plytelės */
+.mods { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+.mod { --cbg: var(--paper); border: 1px solid var(--line); border-radius: 2px; padding: 16px; display: grid; gap: 12px; align-content: start;
+  background: linear-gradient(var(--tick), var(--tick)) top left / 14px 2px no-repeat, linear-gradient(var(--tick), var(--tick)) top left / 2px 14px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 14px 2px no-repeat, linear-gradient(var(--tick), var(--tick)) bottom right / 2px 14px no-repeat, var(--cbg); }
+.mod:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.mod-h { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; color: var(--fg); text-decoration: none; }
+.mod-h h2 { font-size: 17px; } .mod-h p { margin: 2px 0 0; }
+.mico { width: 40px; height: 40px; padding: 7px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--paper)); }
+.mico-s { width: 15px; height: 15px; vertical-align: -2px; color: var(--accent); }
+.mcnt { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.mc { display: grid; gap: 1px; padding: 6px 8px; border: 1px solid var(--line-soft); border-left: 3px solid var(--line); border-radius: 2px;
+  text-decoration: none; color: var(--fg); background: var(--paper); }
+.mc b { font: 600 20px/1.1 var(--f-mono); } .mc span { font-size: 11.5px; color: var(--muted); line-height: 1.25; }
+.mc:hover { border-color: var(--accent); }
+.mc.red { border-left-color: var(--bad); } .mc.red b { color: var(--bad); }
+.mc.yellow { border-left-color: var(--pause); } .mc.yellow b { color: var(--pause); }
+.mlinks { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.mlinks a { text-decoration: none; }
+/* administravimas: vartotojo kortelė ir rolių matrica */
+.ugrid { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .ugrid { grid-template-columns: 1fr; } }
+.utree { display: grid; gap: 6px; border: 1px solid var(--line-soft); padding: 8px; border-radius: 2px; max-height: 360px; overflow: auto; }
+.ut-a > label { color: var(--fg); font-size: 13.5px; }
+.ut-c { display: flex; flex-wrap: wrap; gap: 2px 12px; padding-left: 24px; }
+.ut-c label { font-size: 12.5px; }
+.tag.plus { border-color: var(--ok); color: var(--ok); } .tag.minus { border-color: var(--bad); color: var(--bad); }
+table.umx td, table.mx td { vertical-align: middle; }
+.ctr, .mxc { text-align: center; }
+tr.mxm th { background: var(--thead); text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--fg); border-top: 1px solid var(--line); }
+.mxwrap { max-height: 70vh; overflow: auto; }
+table.mx thead th { position: sticky; top: 0; z-index: 2; text-transform: none; letter-spacing: 0; font-size: 12px; vertical-align: bottom; }
+table.mx .mxp { min-width: 230px; position: sticky; left: 0; background: var(--paper); z-index: 1; }
+table.mx thead .mxp { z-index: 3; background: var(--thead); }
+.mxr { min-width: 104px; text-align: center; }
+.mxr select { font-size: 11.5px; padding: 2px 4px; margin-top: 3px; }
+.mxc input { width: 18px; height: 18px; cursor: pointer; }
+.mxc.dirty { background: color-mix(in srgb, var(--pause) 18%, transparent); }
+.linkb { background: none; border: 0; color: var(--accent); padding: 0; font-weight: 600; font-size: 12.5px; text-decoration: underline dotted; }
+.linkb:hover:not(:disabled) { background: none; color: var(--accent-hover); }
+.savebar { position: sticky; bottom: 12px; z-index: 4; display: flex; gap: 12px; align-items: center; justify-content: flex-end; padding: 10px 14px;
+  background: var(--head); color: var(--head-fg); border-radius: 2px; box-shadow: 0 6px 20px rgba(0,0,0,.25); border-left: 4px solid var(--signal); }
+.savebar span { margin-right: auto; }
+.savebar .ghost { color: var(--head-fg); border-color: rgba(255,255,255,.35); }

@@ -67,7 +67,8 @@ pagrindiniai pavyzdžiai. Testai (`sample_client`) – be demo; `test_demo.py` �
 |---|---|
 | `vmgt/db.py` | SQLite jungtis, schema (`MIGRATIONS`, `PRAGMA user_version`), laikrodis `now()` / `set_clock` testams, įvykių žurnalas `log_event` |
 | `vmgt/services/` | **Gamybos taisyklės be web** – jokio FastAPI. `RuleError` → 409, `NotFound` → 404 |
-| `services/auth.py` | Vartotojai, rolės (`ROLES`), teisės (`PERMS`), PBKDF2, sesijos (bazėje – žetono SHA-256), PIN terminalui, centrų apribojimas `can_centre` |
+| `services/auth.py` | Vartotojai, rolės (bazėje `roles`, numatytosios `ROLES`), teisės (`PERMS`, moduliai `MODULES`), individualios išimtys, veiksmai pagal barą (`can_at`), teisių žurnalas, PBKDF2, sesijos, PIN terminalui, `can_centre` |
+| `services/home.py` | Pradžios modulių plytelės: kas laukia būtent šio žmogaus |
 | `services/projects.py` | Krepšelis, mazgai (`requires` – nuo kurių mazgų priklauso), etapai (`PHASE_KINDS`), gamybos barai, darbo centrai |
 | `services/tasks.py` | Užduotys, eilės, terminalo veiksmai, **visos pradėjimo taisyklės – `block_reason`** |
 | `services/routing.py` | Technologinis srautas: detalių atšakos → mazgas, kur keliauti toliau, išleidimas į gamybą, perdavimai, atsekamumas, technologo darbų sąrašas, maršruto kopijavimas |
@@ -203,6 +204,29 @@ galioja, 141/8.1 baigiasi po 20 d.; `op3` – pasibaigusi), 7 lydiniai
 kiti EXC2), patikros laukiančioms operacijoms; P-24108 dažytas rėmas
 **sulaikytas** kokybės eilėje (dangos storis). Demo NCR – su 8D.
 `test_kokybe.py`.
+
+## Moduliai, rolės ir teisės (nuo 2026-10-26)
+
+Vartotojo prašymas: daug skirtingų rolių – funkcijas sudėlioti į modulius,
+patogus dizainas ir teisių administravimas pagal vartotoją ir darbo centrą.
+Sprendimai: **redaguojamos rolės + individualios išimtys**; „pagal centrą“ –
+**veiksmai pagal barą** (meistras – savo baruose); pradžia – **modulių
+plytelės**; administravime – **vartotojo kortelė, rolių matrica, teisių
+žurnalas**. Migracija 14.
+
+| | |
+|---|---|
+| moduliai | `app.js` `MODS`: Projektai, Mano darbai, Planavimas, Gamyba, Kokybė, Tiekimas, Analitika, Administravimas – kiekvienas su skyriais ir teisėmis. Viršuje – moduliai, kuriuose žmogus turi bent vieną skyrių; po jais – aktyvaus modulio skyriai (`#subnav`). Ankstesnės plano kortelės (`planTabs`) dabar tuščios – jas pakeitė skyrių juosta. Portfelis – `#/projektai` |
+| pradžia | `#/` – plytelės (`home.tiles`): skaičiai, dėl kurių būtent JIS gali ką padaryti (meistrui – tik jo barų eilės ir failai), su nuorodomis; operatorius be `view` – iškart į terminalą. Atsinaujina kas minutę |
+| rolės | `roles` (kodas, pavadinimas, teisės, `scope`, aprašymas, `system`). Įprastos įrašomos paleidžiant (`ensure_roles`, esamų neperrašo). `#/admin/roles` – matrica moduliai × rolės, pakeitimai kaupiami ir įrašomi kartu su santrauka; nauja rolė – kopija iš kitos; įprastos nepašalinamos, su vartotojais – taip pat. Administratorius visada turi viską (užrakinta) |
+| išimtys | `users.perm_add` / `perm_remove`: vartotojo kortelėje kiekvienai teisei „pagal rolę / + suteikti / − atimti“; „Galioja“ stulpelis rodo rezultatą ir kur (barai). Pakeitus rolę nebereikalingos išimtys išvalomos |
+| pagal barą | `auth.SCOPED` = eilės (`plan`), kalendorius, meistro patvirtinimai (`ack_rev`: revizija, failai, patikros išimtis), terminalas. Rolei `scope='own'` (numatyta meistrui) jos galioja tik `users.centres` baruose / centruose, kitur – tik matyti („… – ne jūsų baras: čia galite tik matyti“). Terminalas ribojamas visada. Tikrinama paslaugose (`tasks.ack_revision`, `ncfiles.ack`, `quality.waive`, `planner._apply` eilei) ir API (`plan approve`, kalendorius – gamyklos kalendorių ir šablonus meistras keisti negali); sąsajoje `canAt` slepia mygtukus |
+| darbo vietos | kortelėje – barų ir centrų medis (pažymėtas baras = visi jo centrai, ir nauji); `/api/centres` mato visus, kas turi `view` (terminalo pasirinkime filtruojama pagal `execute`) |
+| apsauga | `_keep_admin`: po kiekvieno pakeitimo bent vienas aktyvus vartotojas turi likti su `admin` teise – kitaip klaida (atšaukiama visa operacija) |
+| žurnalas | `access_log`: kas, kada, kam (vartotojas / rolė) ir kas pakeista žmonių kalba (rolė, barai, išimtys, PIN / slaptažodis – be reikšmių, įjungimas). `#/admin/zurnalas` ir kortelės istorija; netrinamas – auditui |
+
+`test_teises.py`. Rasta: senas `perms_of` liko failo apačioje ir perrašydavo
+naująjį (Python ima paskutinį apibrėžimą) – rolių pakeitimai negaliodavo.
 
 ## Darbo kalendorius (nuo 2026-10-26)
 

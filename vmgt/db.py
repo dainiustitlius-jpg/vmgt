@@ -566,6 +566,32 @@ MIGRATIONS: list[str] = [
         UNIQUE (scope, scope_id, day)
     );
     """,
+    # 14 – rolės bazėje (redaguojamos lange), individualios vartotojo teisių
+    # išimtys ir teisių pakeitimų žurnalas (auditui). Įprastos rolės įrašomos
+    # paleidžiant (`auth.ensure_roles`) – jų sąrašas gyvena kode.
+    """
+    CREATE TABLE roles (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        perms TEXT NOT NULL DEFAULT '',        -- teisės per kablelį
+        scope TEXT NOT NULL DEFAULT 'all',     -- all / own: bare ribojami veiksmai tik savo baruose
+        description TEXT NOT NULL DEFAULT '',
+        system INTEGER NOT NULL DEFAULT 0,     -- įprasta rolė: pašalinti negalima
+        sort INTEGER NOT NULL DEFAULT 0
+    );
+    ALTER TABLE users ADD COLUMN perm_add TEXT NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN perm_remove TEXT NOT NULL DEFAULT '';
+    CREATE TABLE access_log (
+        id INTEGER PRIMARY KEY,
+        at TEXT NOT NULL,
+        by_id INTEGER REFERENCES users(id),
+        target TEXT NOT NULL,                  -- user / role
+        target_id TEXT NOT NULL,               -- vartotojo id arba rolės kodas
+        summary TEXT NOT NULL,                 -- žmonių kalba: kas pakeista
+        data TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX ix_access_log ON access_log (target, target_id, at);
+    """,
 ]
 
 

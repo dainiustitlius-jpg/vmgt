@@ -81,6 +81,7 @@ function formData(form) {
 const ROUTES = [
   [/^#\/login$/, pageLogin],
   [/^#\/?$/, pageHome],
+  [/^#\/projektai$/, pageProjects],
   [/^#\/p\/(\d+)(?:\/(\w+))?$/, pageProject],
   [/^#\/uzduotys$/, pageMyActions],
   [/^#\/mano(?:\/(\d{4}-\d{2}-\d{2}))?$/, pageMyWeek],
@@ -102,7 +103,7 @@ const ROUTES = [
   [/^#\/duomenys$/, pageData],
   [/^#\/technologija$/, pageTechList],
   [/^#\/technologija\/(\d+)$/, pageTechEdit],
-  [/^#\/admin$/, pageAdmin],
+  [/^#\/admin(?:\/(vartotojai|roles|centrai|zurnalas)(?:\/(\d+))?)?$/, pageAdmin],
 ];
 
 async function route() {
@@ -127,18 +128,14 @@ function renderNav() {
   const top = $("#top");
   if (!S.me) { top.hidden = true; return; }
   top.hidden = false;
-  const items = [
-    ["#/", "Projektai", "view"], ["#/mano", "Mano darbai", null], ["#/uzduotys", "Užduotys", null], ["#/apkrova", "Apkrova", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
-    ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"], ["#/kokybe", "Kokybė", "view"],
-    ["#/komponentai", "Komponentai", "view"],
-    ["#/analitika", "Analitika", "view"], ["#/technologija", "Technologija", "tasks"], ["#/duomenys", "Duomenys", "tasks"], ["#/admin", "Administravimas", "admin"],
-  ].filter(x => !x[2] || can(x[2]));
-  const h = location.hash || "#/";
-  $("#nav").innerHTML = items.map(([href, label]) => {
-    const on = href === "#/" ? (h === "#/" || h.startsWith("#/p/")) : h.startsWith(href);
-    return `<a href="${href}" class="${on ? "on" : ""}">${label}</a>`;
-  }).join("");
-  $("#who").textContent = `${S.me.name} · ${S.me.role_label}`;
+  // viršuje – moduliai, po jais – aktyvaus modulio skyriai
+  const h = location.hash || "#/", cur = modOf(h);
+  $("#nav").innerHTML = `<a href="#/" class="${h === "#/" ? "on" : ""}">Pradžia</a>` + MODS.filter(m => modSections(m).length).map(m =>
+    `<a href="${modSections(m)[0][0]}" class="${cur === m ? "on" : ""}">${icon(m.key, "nico")}${m.label}</a>`).join("");
+  const secs = cur ? modSections(cur) : [], on = cur && sectionOf(cur, h);
+  $("#subnav").hidden = secs.length < 2;
+  $("#subnav").innerHTML = secs.map(s => `<a href="${s[0]}" class="${s[0] === on ? "on" : ""}">${esc(s[1])}</a>`).join("");
+  $("#who").innerHTML = `${esc(S.me.name)}<small>${esc(S.me.role_label)}</small>`;
   bellCount();
 }
 $("#logout").onclick = async () => { await POST("/api/logout").catch(() => {}); S.me = null; location.hash = "#/login"; route(); };
@@ -203,9 +200,81 @@ async function pageLogin() {
   });
 }
 
-function pageHome() {
-  if (!can("view")) { location.hash = "#/t"; return; }
-  return pageProjects();
+// ---------- moduliai: navigacija ir pradžios plytelės ----------
+// Vartotojo sprendimas (2026-10-26): funkcijos sudėliotos į modulius, pradžia –
+// modulių plytelės su tuo, kas laukia. Meniu rodo tik modulius, kuriuose
+// žmogus turi bent vieną skyrių, o modulio skyriai – antroje juostoje.
+const ICONS = {
+  projektai: '<path d="M3 6h7l2 2h9v11H3z"/><path d="M7 13h6M7 16h9"/>',
+  mano: '<rect x="4" y="4" width="16" height="17" rx="1"/><path d="M8 2v4M16 2v4M8 11l2 2 4-4M8 17h8"/>',
+  planavimas: '<path d="M3 5h18M3 5v15h18V5"/><path d="M6 9h6M9 13h8M5 17h5"/>',
+  gamyba: '<path d="M3 21h10M7 21v-4"/><circle cx="7" cy="15" r="2"/><path d="m8.5 13.5 5-5"/><circle cx="15" cy="7" r="2"/><path d="M17 7h3M20 4.5v5"/>',
+  kokybe: '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+  tiekimas: '<path d="M3 8 12 3l9 5v9l-9 5-9-5z"/><path d="m3 8 9 5 9-5M12 13v9"/>',
+  analitika: '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
+  admin: '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 11l2 2 3-4"/>',
+};
+const icon = (k, cls = "") => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k] || ""}</svg>`;
+const MODS = [
+  { key: "projektai", label: "Projektai", desc: "Projektų portfelis ir krepšelis, sveikata, etapai, susitikimai",
+    match: ["#/projektai", "#/p/", "#/m/"], sections: [["#/projektai", "Portfelis", "view"]] },
+  { key: "mano", label: "Mano darbai", desc: "Asmeninis savaitės planas, man priskirtos užduotys, pranešimai",
+    match: ["#/mano", "#/uzduotys"], sections: [["#/mano", "Savaitės planas", null], ["#/uzduotys", "Užduotys", null]] },
+  { key: "planavimas", label: "Planavimas", desc: "Departamentų planas, centrų eilės, darbo kalendorius, apkrova",
+    match: ["#/planas", "#/apkrova"], sections: [["#/planas", "Departamentų planas", "view"], ["#/planas/eiles", "Centrų eilės", "plan"],
+      ["#/planas/kalendorius", "Darbo kalendorius", "view"], ["#/apkrova", "Apkrova", "view"]] },
+  { key: "gamyba", label: "Gamyba", desc: "Cecho būsena ir planas, terminalai, technologija ir maršrutai",
+    match: ["#/cechas", "#/t", "#/technologija", "#/duomenys", "#/r/"], sections: [["#/cechas", "Cechas", "view"], ["#/t", "Terminalas", "execute"],
+      ["#/technologija", "Technologija", "tasks"], ["#/duomenys", "Duomenys ir importas", "tasks"]] },
+  { key: "kokybe", label: "Kokybė", desc: "Kontrolės eilė, medžiagos, suvirinimas, neatitiktys, dosjė",
+    match: ["#/kokybe", "#/ncr", "#/dosje"], sections: [["#/kokybe", "Kokybės kontrolė", "view"], ["#/ncr", "Neatitiktys", "ncr_report"]] },
+  { key: "tiekimas", label: "Tiekimas", desc: "Pirktiniai komponentai: užsakymai, gavimai, vėlavimai",
+    match: ["#/komponentai"], sections: [["#/komponentai", "Komponentai", "view"]] },
+  { key: "analitika", label: "Analitika", desc: "Darbo laikas, prastovos, faktas prieš normą, tiekėjai",
+    match: ["#/analitika"], sections: [["#/analitika", "Efektyvumas", "view"]] },
+  { key: "admin", label: "Administravimas", desc: "Vartotojai, rolės ir teisės, barai ir centrai, žurnalas",
+    match: ["#/admin"], sections: [["#/admin/vartotojai", "Vartotojai", "admin"], ["#/admin/roles", "Rolės ir teisės", "admin"],
+      ["#/admin/centrai", "Barai ir centrai", "admin"], ["#/admin/zurnalas", "Teisių žurnalas", "admin"]] },
+];
+const modSections = m => m.sections.filter(s => !s[2] || can(s[2]));
+const modOf = h => MODS.find(m => m.match.some(p => h === p || h.startsWith(p.endsWith("/") ? p : p + "/")));
+// aktyvus skyrius – ilgiausias sutampantis; #/planas/<centras> – centrų eilės
+function sectionOf(m, h) {
+  if (m.key === "planavimas" && /^#\/planas\/(?!kalendorius)/.test(h)) return "#/planas/eiles";
+  return m.sections.map(s => s[0]).filter(p => h === p || h.startsWith(p + "/")).sort((a, b) => b.length - a.length)[0];
+}
+// bare ribojamos teisės: meistrui – tik savo barų / centrų darbai
+const SCOPED = new Set(["execute", "ack_rev", "plan", "calendar"]);
+function canAt(perm, centre, area) {
+  if (!can(perm)) return false;
+  if (!SCOPED.has(perm) || (perm !== "execute" && S.me.scope === "all")) return true;
+  const c = S.me.centres || [];
+  return !c.length || c.includes(centre) || (!!area && c.includes(area));
+}
+
+async function pageHome() {
+  if (!can("view") && can("execute")) { location.hash = "#/t"; return; }
+  const draw = async () => {
+    const r = await GET("/api/home");
+    const byKey = Object.fromEntries(r.tiles.map(t => [t.key, t]));
+    const hour = new Date().getHours();
+    const hi = hour < 11 ? "Labas rytas" : hour < 18 ? "Laba diena" : "Labas vakaras";
+    const tiles = MODS.filter(m => byKey[m.key] && modSections(m).length);
+    app().innerHTML = `<div class="row between"><div><h1>${hi}, ${esc(S.me.name.split(" ")[0])}</h1>
+        <p class="muted">${esc(S.me.role_label)}${S.me.centres.length ? ` · ${S.me.scope === "own" ? "jūsų barai" : "darbo vietos"}: <b class="mono">${esc(S.me.centres.join(", "))}</b>` : ""}</p></div>
+        <span class="muted small">${new Date().toLocaleDateString("lt-LT", { weekday: "long", month: "long", day: "numeric" })}</span></div>
+      <div class="mods">${tiles.map(m => {
+        const t = byKey[m.key], secs = modSections(m);
+        return `<section class="mod">
+          <a class="mod-h" href="${secs[0][0]}">${icon(m.key, "mico")}<div><h2>${esc(m.label)}</h2><p class="muted small">${esc(m.desc)}</p></div></a>
+          ${t.counters.length ? `<div class="mcnt">${t.counters.map(c => `<a class="mc ${c.sev}" href="${esc(c.href || secs[0][0])}"><b>${c.n}</b><span>${esc(c.label)}</span></a>`).join("")}</div>` : ""}
+          ${t.note ? `<p class="muted small">${esc(t.note)}</p>` : ""}
+          <div class="mlinks">${secs.map(s => `<a href="${s[0]}">${esc(s[1])} →</a>`).join("")}</div></section>`;
+      }).join("")}</div>`;
+    $$('.mc[href="#bell"]').forEach(a => a.onclick = e => { e.preventDefault(); $("#bell").click(); });
+  };
+  await draw();
+  S.timers.push(setInterval(() => { if ($("#modal").hidden) draw(); }, 60000));
 }
 
 // ---------- projektų krepšelis ----------
@@ -342,7 +411,7 @@ async function pageProject(pid, tab) {
   };
 
   app().innerHTML = `
-  <div class="row between"><div><a href="#/">← Krepšelis</a><h1><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</h1>
+  <div class="row between"><div><a href="#/projektai">← Portfelis</a><h1><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</h1>
     <p class="muted">${esc(p.customer)} · terminas ${esc(p.due_date || "—")} · vadovas ${esc(p.manager_name || "—")}</p></div>
     <div class="row">${p.exc_class ? `<span class="pill s-gali" title="EN 1090-2 vykdymo klasė">${esc(p.exc_class)}</span>` : ""} ${healthBadge(h)} ${pill(p.status, p.status_label)}
       <a class="btn ghost small" href="#/dosje/${p.id}">Kokybės dosjė</a></div></div>
@@ -921,7 +990,8 @@ function centreModal(c, a) {
 }
 
 // ---------- planas ----------
-const planTabs = on => `<nav class="tabs"><a href="#/planas" class="${on === "g" ? "on" : ""}">Departamentų planas</a><a href="#/planas/eiles" class="${on === "q" ? "on" : ""}">Centrų eilės</a><a href="#/planas/kalendorius" class="${on === "k" ? "on" : ""}">Darbo kalendorius</a></nav>`;
+// skyriai (planas, eilės, kalendorius, apkrova) – modulio juostoje viršuje
+const planTabs = () => "";
 
 async function pagePlan(code) {
   if (!code) return pagePlanner();
@@ -932,10 +1002,12 @@ async function pagePlan(code) {
   localStorage.setItem("pf.plan", code);
   const r = await GET(`/api/plan/${code}`);
   const unapproved = r.tasks.filter(t => !t.approved).length;
+  // meistras eilę tvarko tik savo baruose, kitų barų – tik mato
+  const mine = canAt("plan", r.centre.code, r.centre.area_code);
   app().innerHTML = `<div class="row between"><h1>Planavimas</h1>
     <select id="pc">${centreOptions(centres, code)}</select></div>${planTabs("q")}
   <div class="card"><div class="row between"><h2>${esc(r.centre.code)} ${esc(r.centre.name)}</h2>
-    <button id="appr" ${unapproved ? "" : "disabled"}>Patvirtinti eilę${unapproved ? ` (${unapproved} naujos)` : ""}</button></div>
+    ${mine ? `<button id="appr" ${unapproved ? "" : "disabled"}>Patvirtinti eilę${unapproved ? ` (${unapproved} naujos)` : ""}</button>` : `<span class="tag">ne jūsų baras – tik peržiūra</span>`}</div>
     <p class="muted">Terminalas rodo tik patvirtintas užduotis. ${r.centre.strict_order ? "Šiame centre griežta eilė: pradėti galima tik pirmą." : "Operatorius gali rinktis iš eilės."}
       Prognozė – pagal eilę, normas ir <a href="#/planas/kalendorius/centre/${r.centre.id}">centro darbo kalendorių</a>.</p>
     <div class="tbl"><table><thead><tr><th>#</th><th>Projektas · mazgas</th><th>Operacija</th><th>Kiekis</th><th>Terminas</th><th>Prognozė</th><th>Būsena</th><th>Kliūtis</th><th></th></tr></thead>
@@ -946,11 +1018,11 @@ async function pagePlan(code) {
       <td>${fcCell(t.forecast)}</td>
       <td>${pill(t.status, t.status)} ${t.approved ? "" : '<span class="muted">nepatvirtinta</span>'}</td>
       <td class="lock">${esc(t.lock || "")}${t.components_missing ? `<div class="warn">⚠ negauti komponentai: ${t.components_missing} eil.</div>` : ""}</td>
-      <td class="row" style="flex-wrap:nowrap"><button class="small ghost" data-mv="top" data-id="${t.id}" title="Į pradžią">⤒</button>
-        <button class="small ghost" data-mv="up" data-id="${t.id}">▲</button><button class="small ghost" data-mv="down" data-id="${t.id}">▼</button></td></tr>`).join("")
+      <td class="row" style="flex-wrap:nowrap">${mine ? `<button class="small ghost" data-mv="top" data-id="${t.id}" title="Į pradžią">⤒</button>
+        <button class="small ghost" data-mv="up" data-id="${t.id}">▲</button><button class="small ghost" data-mv="down" data-id="${t.id}">▼</button>` : ""}</td></tr>`).join("")
       || `<tr><td colspan="9" class="muted">Eilėje užduočių nėra.</td></tr>`}</tbody></table></div></div>`;
   $("#pc").onchange = e => (location.hash = `#/planas/${e.target.value}`);
-  $("#appr").onclick = async () => { await act(() => POST(`/api/plan/${code}/approve`), "Eilė patvirtinta"); pagePlan(code); };
+  const ap = $("#appr"); if (ap) ap.onclick = async () => { await act(() => POST(`/api/plan/${code}/approve`), "Eilė patvirtinta"); pagePlan(code); };
   $$("[data-mv]").forEach(b => b.onclick = async () => {
     const r = await act(() => POST(`/api/tasks/${b.dataset.id}/move`, { where: b.dataset.mv }));
     // perkėlimas eilėje signalizuoja projektams, kurių darbai pasislinko
@@ -981,7 +1053,9 @@ async function pageCalendar(scope, id) {
   const [areas, centres] = await Promise.all([GET("/api/areas"), GET("/api/centres")]);
   const draw = async () => {
     const [r, pats] = await Promise.all([GET(`/api/calendar?scope=${scope}&id=${id}&year=${year}`), GET("/api/calendar/patterns")]);
-    const edit = can("calendar");
+    // meistras – tik savo barų ir jų centrų kalendorių; gamyklos – planuotojas, vadovas
+    const edit = can("calendar") && (S.me.scope === "all" || (scope === "area" && canAt("calendar", "", (areas.find(a => a.id === id) || {}).code))
+      || (scope === "centre" && (c => c && canAt("calendar", c.code, c.area_code))(centres.find(c => c.id === id))));
     const byDate = Object.fromEntries(r.days.map(x => [x.date, x]));
     const now = today();
     const month = m => {
@@ -1007,7 +1081,7 @@ async function pageCalendar(scope, id) {
           ${pats.map(p => `<option value="${p.id}" ${p.id === r.own_pattern ? "selected" : ""}>${esc(p.name)} · ${p.week_hours} val./sav.</option>`).join("")}</select>`
           : `<b>${esc(r.pattern ? r.pattern.name : "—")}</b>`}</label>
         <span class="muted small">${r.pattern ? `${r.pattern_src !== scope ? `paveldėta iš ${srcLabel} kalendoriaus · ` : ""}${esc(weekText(r.pattern.week))}` : ""}</span>
-        ${edit ? `<button class="ghost small" id="k-pats">Pamainų šablonai…</button>` : ""}</div>
+        ${edit && S.me.scope === "all" ? `<button class="ghost small" id="k-pats">Pamainų šablonai…</button>` : ""}</div>
       <div class="calleg muted small">${["darbo", "poilsio", "svente", "nedarbo", "remontas", "papildomas", "kitas"].map(k => `<span><i class="cday k-${k}"></i>${CAL_KIND[k]}</span>`).join("")}
         <span><i class="cday k-darbo own"></i>šio kalendoriaus išimtis</span><span><i class="cday k-nedarbo inh"></i>paveldėta</span></div>
       <p class="muted small">${edit ? "Spustelėkite dieną arba pele pažymėkite kelias – nurodysite nedarbo dieną, remontą, papildomą darbą ar kitą laiką. " : ""}Centras paveldi baro ir gamyklos kalendorių (šventės, uždarymai), baras – gamyklos.</p>
@@ -1026,7 +1100,7 @@ async function pageCalendar(scope, id) {
     $("#k-next").onclick = () => { year++; S.calYear = year; draw(); };
     if (!edit) return;
     $("#k-pat").onchange = async e => calSaved(await act(() => PUT("/api/calendar/pattern", { scope, scope_id: id, pattern_id: e.target.value ? +e.target.value : null })), draw);
-    $("#k-pats").onclick = () => patternsModal(pats, draw);
+    const kp = $("#k-pats"); if (kp) kp.onclick = () => patternsModal(pats, draw);
     $$("[data-rm]").forEach(b => b.onclick = async () => {
       const [a, z] = b.dataset.rm.split("|");
       calSaved(await act(() => POST("/api/calendar/days", { scope, scope_id: id, from: a, to: z, kind: "iprasta" })), draw);
@@ -1305,7 +1379,8 @@ async function impactModal(change, after, onCancel) {
 // ---------- terminalas ----------
 async function pageTerminal(code) {
   document.body.classList.add("term");
-  const centres = await GET("/api/centres");
+  // terminale – tik centrai, kuriuose žmogus gali dirbti
+  const centres = (await GET("/api/centres")).filter(c => canAt("execute", c.code, c.area_code));
   if (!code) {
     const saved = localStorage.getItem("pf.term");
     if (saved && centres.some(c => c.code === saved)) { location.hash = `#/t/${saved}`; return; }
@@ -1317,7 +1392,7 @@ async function pageTerminal(code) {
   let data, scanFocus = false;   // skaitytuvas veikia kaip klaviatūra – fokusas išlieka po atnaujinimo
   const draw = async () => {
     data = await GET(`/api/terminal/${code}`);
-    S.termCal = data.calendar;
+    S.termCal = data.calendar; S.termArea = data.centre.area_code;
     const run = data.running;
     const first = data.queue.findIndex(t => !t.lock);
     app().innerHTML = `<div class="tm">
@@ -1334,8 +1409,8 @@ async function pageTerminal(code) {
             ${t.held.length ? `<div class="warn">⧗ Padarytos detalės sulaikytos – laukia kokybės kontrolės: ${esc(t.held.join(", "))}</div>` : ""}
             ${t.lock ? `<div class="lock">🔒 ${esc(t.lock)}</div>` : ""}
             ${t.components_missing ? `<div class="warn">⚠ Negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}</div>
-          <div>${t.lock && t.lock.includes("revizija") && can("ack_rev") ? `<button class="b-pause" data-ack="${t.id}">Patvirtinti reviziją</button>` : ""}
-            ${t.files_pending && can("ack_rev") ? `<button class="b-pause" data-ackf="${t.id}">Patvirtinti failą</button>` : ""}
+          <div>${t.lock && t.lock.includes("revizija") && canAt("ack_rev", data.centre.code, data.centre.area_code) ? `<button class="b-pause" data-ack="${t.id}">Patvirtinti reviziją</button>` : ""}
+            ${t.files_pending && canAt("ack_rev", data.centre.code, data.centre.area_code) ? `<button class="b-pause" data-ackf="${t.id}">Patvirtinti failą</button>` : ""}
             ${!run && !t.lock ? `<button class="b-ok" data-start="${t.id}">▶ Start</button>` : ""}</div>
         </div>`).join("") || `<p class="muted">Tuščia.</p>`}
         ${data.unapproved ? `<p class="muted">Dar ${data.unapproved} užduotys laukia planuotojo patvirtinimo.</p>` : ""}</div>
@@ -1793,7 +1868,7 @@ function termQuality(t) {
         : c.status === "ok" || c.status === "isimtis" ? `<span class="muted">${c.value != null ? esc(String(c.value).replace(".", ",")) + " " + esc(c.unit) : "OK"}</span>`
         : c.kind === "measure" ? `<input type="text" inputmode="decimal" autocomplete="off" class="tqv" data-cv="${c.id}" placeholder="${esc(c.unit || "reikšmė")}" aria-label="${esc(c.name)}"><button class="b-ok" data-cm="${c.id}">Įrašyti</button>`
         : `<button class="b-ok" data-cok="${c.id}">OK</button><button class="b-stop" data-cnok="${c.id}">NOK</button>`}
-        ${can("ack_rev") && (c.status === "laukia" || c.status === "nok") ? `<button class="ghost small" data-cw="${c.id}">Išimtis</button>` : ""}</div></div>`).join("")}
+        ${canAt("ack_rev", t.centre_code, S.termArea) && (c.status === "laukia" || c.status === "nok") ? `<button class="ghost small" data-cw="${c.id}">Išimtis</button>` : ""}</div></div>`).join("")}
     ${t.needs_material || (t.materials || []).length ? `<div class="tqrow ${(t.materials || []).length ? "ok" : "laukia"}"><span class="tqi">${(t.materials || []).length ? "✓" : "○"}</span>
       <div><b>Medžiaga (lydinys)</b>${t.needs_material ? ` <span class="muted">– ${esc(t.exc_class)}: privaloma prieš perduodant</span>` : ""}
         ${(t.materials || []).map(m => `<div class="muted">⬡ ${esc(m.heat_no)} · ${esc(m.material)} ${esc(m.product)}${m.cert_no ? ` · sert. ${esc(m.cert_no)}` : ""}</div>`).join("")}</div>
@@ -2111,21 +2186,255 @@ async function pageData() {
 }
 
 // ---------- administravimas ----------
-async function pageAdmin() {
+// ---------- administravimas: vartotojai, rolės ir teisės, barai ir centrai, žurnalas ----------
+// Vartotojo sprendimai (2026-10-26): rolės redaguojamos (matrica rolė × teisė),
+// vartotojui – viena rolė ir prireikus individualios išimtys; meistro veiksmai
+// ribojami jo barais; kiekvienas teisių pakeitimas – žurnale (auditui).
+async function pageAdmin(tab, id) {
+  tab = tab || "vartotojai";
+  if (tab === "vartotojai" && id) return pageUserCard(+id);
+  if (tab === "vartotojai") return pageUsers();
+  if (tab === "roles") return pageRoles();
+  if (tab === "zurnalas") return pageAccessLog();
+  return pageCentresAdmin();
+}
+
+const SRC_LABEL = { "rolė": "pagal rolę", papildomai: "papildomai", "atimta": "atimta" };
+// barai ir centrai kaip medis: pažymėtas baras – visi jo centrai (ir nauji)
+function placesTree(areas, centres, sel, idp) {
+  const groups = byArea(centres);
+  return `<div class="utree">${groups.map(g => {
+    const a = areas.find(x => x.code === g.code), on = g.code && sel.includes(g.code);
+    return `<div class="ut-a"><label class="row" style="display:flex">${g.code ? `<input type="checkbox" data-pa="${esc(g.code)}" ${on ? "checked" : ""} id="${idp}-a-${esc(g.code)}">` : ""}
+        <b>${esc(a ? a.name : g.name)}</b>${g.code ? ` <span class="muted mono small">${esc(g.code)}</span>` : ""}</label>
+      <div class="ut-c">${g.items.map(c => `<label class="row" style="display:flex"><input type="checkbox" data-pc="${esc(c.code)}" data-area="${esc(g.code)}"
+        ${on || sel.includes(c.code) ? "checked" : ""} ${on ? "disabled" : ""} id="${idp}-c-${esc(c.code)}"><span class="mono">${esc(c.code)}</span></label>`).join("")}</div></div>`;
+  }).join("")}</div>`;
+}
+function readPlaces(box) {
+  const out = $$("[data-pa]", box).filter(x => x.checked).map(x => x.dataset.pa);
+  $$("[data-pc]", box).forEach(x => { if (x.checked && !out.includes(x.dataset.area)) out.push(x.dataset.pc); });
+  return out;
+}
+function wirePlaces(box) {
+  $$("[data-pa]", box).forEach(a => a.onchange = () => $$(`[data-pc][data-area="${a.dataset.pa}"]`, box).forEach(c => { c.checked = a.checked; c.disabled = a.checked; }));
+}
+
+async function pageUsers() {
+  const [users, roles, areas, centres] = await Promise.all([GET("/api/users"), GET("/api/roles"), GET("/api/areas"), GET("/api/centres?all=1")]);
+  let q = "", role = "", place = "";
+  try { role = sessionStorage.getItem("pf.urole") || ""; } catch {}
+  const draw = () => {
+    const list = users.filter(u => (!q || (u.name + " " + u.login).toLowerCase().includes(q.toLowerCase()))
+      && (!role || u.role === role) && (!place || u.centres.includes(place) || centres.some(c => c.code && u.centres.includes(c.code) && c.area_code === place)));
+    $("#u-list").innerHTML = `<table><thead><tr><th>Vardas</th><th>Prisijungimas</th><th>Rolė</th><th>Barai / centrai</th><th>Išimtys</th><th>PIN</th><th>Būsena</th></tr></thead>
+      <tbody>${list.map(u => `<tr class="click ${u.active ? "" : "dim"}" data-go="${u.id}" tabindex="0">
+        <td><b>${esc(u.name)}</b></td><td class="mono">${esc(u.login)}</td>
+        <td>${esc(u.role_label)}${u.scope === "own" ? ` <span class="tag" title="Eilės, kalendorius, patvirtinimai – tik savo baruose">savo barai</span>` : ""}</td>
+        <td class="mono small">${esc(u.centres.join(", ")) || '<span class="muted">visi</span>'}</td>
+        <td>${u.perm_add.length ? `<span class="tag plus" title="${esc(u.perm_add.join(", "))}">+${u.perm_add.length}</span>` : ""}${u.perm_remove.length ? ` <span class="tag minus" title="${esc(u.perm_remove.join(", "))}">−${u.perm_remove.length}</span>` : ""}</td>
+        <td>${u.has_pin ? "✓" : '<span class="muted">—</span>'}</td><td>${u.active ? pill("baigta", "aktyvus") : pill("tuscia", "išjungtas")}</td></tr>`).join("")
+        || `<tr><td colspan="7" class="muted">Nerasta.</td></tr>`}</tbody></table>`;
+    $("#u-n").textContent = `${list.length} iš ${users.length}`;
+    $$("[data-go]").forEach(tr => { tr.onclick = () => (location.hash = `#/admin/vartotojai/${tr.dataset.go}`); tr.onkeydown = e => e.key === "Enter" && tr.onclick(); });
+  };
+  app().innerHTML = `<div class="row between"><h1>Vartotojai</h1><button id="u-new">+ Naujas vartotojas</button></div>
+    <div class="card"><div class="row">
+      <input id="u-q" placeholder="Paieška: vardas ar prisijungimas" aria-label="Paieška" style="flex:1;min-width:180px">
+      <select id="u-r" aria-label="Rolė"><option value="">Visos rolės</option>${roles.map(r => `<option value="${esc(r.code)}" ${r.code === role ? "selected" : ""}>${esc(r.name)} (${r.users})</option>`).join("")}</select>
+      <select id="u-p" aria-label="Baras"><option value="">Visi barai</option>${areas.map(a => `<option value="${esc(a.code)}">${esc(a.code)} ${esc(a.name)}</option>`).join("")}</select>
+      <span class="muted small" id="u-n"></span></div>
+      <div class="tbl" id="u-list"></div></div>`;
+  $("#u-q").oninput = e => { q = e.target.value; draw(); };
+  $("#u-r").onchange = e => { role = e.target.value; try { sessionStorage.setItem("pf.urole", role); } catch {} draw(); };
+  $("#u-p").onchange = e => { place = e.target.value; draw(); };
+  $("#u-new").onclick = () => modal(`<h2>Naujas vartotojas</h2><form id="nu" class="stack">
+    <div class="row"><label style="flex:1">Vardas, pavardė<input name="name" required id="nu-name"></label><label>Prisijungimo vardas<input name="login" required id="nu-login" autocomplete="off"></label></div>
+    <label>Rolė<select name="role" id="nu-role">${roles.map(r => `<option value="${esc(r.code)}" ${r.code === "operatorius" ? "selected" : ""}>${esc(r.name)} – ${esc(r.description)}</option>`).join("")}</select></label>
+    <div class="row"><label>Slaptažodis<input name="password" type="password" required id="nu-pw" autocomplete="new-password"></label><label>PIN terminalui<input name="pin" inputmode="numeric" style="width:110px" id="nu-pin" autocomplete="off"></label></div>
+    <div><b class="small">Kur dirba</b> <span class="muted small">– nieko nepažymėjus: visi barai</span>${placesTree(areas, centres.filter(c => c.active), [], "nu")}</div>
+    <div class="row"><button>Sukurti</button><button type="button" class="ghost" id="nu-x">Atšaukti</button></div></form>`, box => {
+    wirePlaces(box); $("#nu-x").onclick = closeModal;
+    $("#nu").onsubmit = async e => {
+      e.preventDefault(); const d = formData(e.target); d.centres = readPlaces(box);
+      const r = await act(() => POST("/api/users", d), "Vartotojas sukurtas");
+      if (r) { closeModal(); location.hash = `#/admin/vartotojai/${r.id}`; }
+    };
+  });
+  draw();
+}
+
+async function pageUserCard(uid) {
+  const [u, roles, areas, centres] = await Promise.all([GET(`/api/users/${uid}`), GET("/api/roles"), GET("/api/areas"), GET("/api/centres?all=1")]);
+  const st = { role: u.role, add: new Set(u.perm_add), rem: new Set(u.perm_remove) };
+  const roleOf = c => roles.find(r => r.code === c) || { perms: [], scope: "all", name: c };
+  const perms = () => S.meta.perm_modules;
+  const rights = () => {
+    const r = roleOf(st.role), has = p => st.role === "admin" || ((r.perms.includes(p) || st.add.has(p)) && !st.rem.has(p));
+    const places = readPlaces($("#uc-places"));
+    return perms().map(m => `<tr class="mxm"><th colspan="4">${icon(m.key, "mico-s")} ${esc(m.label)}</th></tr>${m.perms.map(p => {
+      const inRole = st.role === "admin" || r.perms.includes(p.key), val = st.rem.has(p.key) ? "-" : st.add.has(p.key) ? "+" : "";
+      const where = !has(p.key) ? "" : p.scoped && (p.key === "execute" || r.scope === "own") ? (places.length ? places.join(", ") : "visi barai") : p.scoped ? "visi barai" : "";
+      return `<tr class="${has(p.key) ? "" : "dim"}"><td title="${esc(p.description)}">${esc(p.label)}<div class="muted small">${esc(p.description)}</div></td>
+        <td class="ctr">${inRole ? "✓" : '<span class="muted">—</span>'}</td>
+        <td><select data-ex="${p.key}" aria-label="Išimtis: ${esc(p.label)}" ${st.role === "admin" ? "disabled" : ""}>
+          <option value="" ${val === "" ? "selected" : ""}>pagal rolę</option>
+          ${inRole ? `<option value="-" ${val === "-" ? "selected" : ""}>− atimti</option>` : `<option value="+" ${val === "+" ? "selected" : ""}>+ suteikti</option>`}</select></td>
+        <td>${has(p.key) ? `<b class="s-baigta">✓ gali</b>${where ? `<div class="muted small mono">${esc(where)}</div>` : ""}` : '<span class="muted">negali</span>'}</td></tr>`;
+    }).join("")}`).join("");
+  };
+  app().innerHTML = `<div><a href="#/admin/vartotojai">← Vartotojai</a></div>
+    <div class="row between"><div><h1>${esc(u.name)}</h1><p class="muted"><span class="mono">${esc(u.login)}</span> · ${u.active ? "aktyvus" : "išjungtas"}${u.last_login ? ` · paskutinį kartą prisijungė ${dt(u.last_login)}` : " · dar nesijungė"}</p></div>
+      <div class="row"><button id="uc-save">Išsaugoti pakeitimus</button></div></div>
+    <div class="ugrid">
+      <div class="card"><h2>Rolė ir darbo vietos</h2>
+        <label>Vardas, pavardė<input id="uc-name" value="${esc(u.name)}"></label>
+        <label>Rolė<select id="uc-role">${roles.map(r => `<option value="${esc(r.code)}" ${r.code === u.role ? "selected" : ""}>${esc(r.name)}</option>`).join("")}</select></label>
+        <p class="muted small" id="uc-rdesc"></p>
+        <label class="row" style="display:flex"><input type="checkbox" id="uc-act" ${u.active ? "checked" : ""}> aktyvus (išjungus – iškart atjungiamas)</label>
+        <div><b class="small">Kur dirba</b> <span class="muted small" id="uc-phint"></span><div id="uc-places">${placesTree(areas, centres.filter(c => c.active), u.centres, "uc")}</div></div>
+        <div class="row"><button class="ghost small" id="uc-pw">Nustatyti slaptažodį</button><button class="ghost small" id="uc-pin">${u.has_pin ? "Keisti PIN" : "Nustatyti PIN"}</button>
+          ${u.has_pin ? `<button class="ghost small" id="uc-nopin">Pašalinti PIN</button>` : ""}</div></div>
+      <div class="card"><div class="row between"><h2>Ką mato ir gali</h2><span class="muted small">Išimtis – tik šiam žmogui, rolė nesikeičia</span></div>
+        <div class="tbl"><table class="umx"><thead><tr><th>Teisė</th><th>Rolėje</th><th>Išimtis</th><th>Galioja</th></tr></thead><tbody id="uc-rights"></tbody></table></div></div>
+    </div>
+    <div class="card"><h2>Teisių pakeitimų istorija</h2>${logTable(u.log, false)}</div>`;
+  const upd = () => {
+    const r = roleOf(st.role);
+    $("#uc-rdesc").textContent = (r.description || "") + (r.scope === "own" ? ". Rolė „savo barai“: eilės, kalendorius ir patvirtinimai galioja tik pažymėtuose baruose, kitur – tik matyti." : "");
+    $("#uc-phint").textContent = r.scope === "own" ? "– čia galioja jo veiksmai (eilės, kalendorius, patvirtinimai) ir terminalas" : "– kuriuose terminaluose gali dirbti; nieko nepažymėjus – visi";
+    $("#uc-rights").innerHTML = rights();
+    $$("[data-ex]").forEach(s => s.onchange = () => {
+      st.add.delete(s.dataset.ex); st.rem.delete(s.dataset.ex);
+      if (s.value === "+") st.add.add(s.dataset.ex); if (s.value === "-") st.rem.add(s.dataset.ex);
+      upd();
+    });
+  };
+  wirePlaces($("#uc-places"));
+  $("#uc-places").addEventListener("change", upd);
+  $("#uc-role").onchange = e => {
+    st.role = e.target.value;
+    // išimtys lieka tik tos, kurios naujai rolei dar ką nors keičia
+    const r = roleOf(st.role);
+    [...st.add].forEach(p => r.perms.includes(p) && st.add.delete(p)); [...st.rem].forEach(p => !r.perms.includes(p) && st.rem.delete(p));
+    upd();
+  };
+  upd();
+  $("#uc-save").onclick = async () => {
+    const body = { name: $("#uc-name").value.trim(), role: st.role, active: $("#uc-act").checked, centres: readPlaces($("#uc-places")),
+      perm_add: [...st.add], perm_remove: [...st.rem] };
+    if (await act(() => PUT(`/api/users/${uid}`, body), "Įrašyta")) pageUserCard(uid);
+  };
+  const secret = (title, field, input) => modal(`<h2>${title}</h2><label>${field === "pin" ? "PIN (4–8 skaitmenys)" : "Naujas slaptažodis"}<input id="sc-v" ${input}></label>
+    <div class="row"><button id="sc-ok">Įrašyti</button><button class="ghost" id="sc-x">Atšaukti</button></div>`, () => {
+    $("#sc-x").onclick = closeModal; $("#sc-v").focus();
+    $("#sc-ok").onclick = async () => {
+      const v = $("#sc-v").value; if (!v) return;
+      if (field === "pin" && !/^\d{4,8}$/.test(v)) { toast("PIN – 4–8 skaitmenys", true); return; }
+      if (await act(() => PUT(`/api/users/${uid}`, { [field]: v }), "Įrašyta")) { closeModal(); pageUserCard(uid); }
+    };
+  });
+  $("#uc-pw").onclick = () => secret("Naujas slaptažodis", "password", 'type="password" autocomplete="new-password"');
+  $("#uc-pin").onclick = () => secret("PIN terminalui", "pin", 'inputmode="numeric" autocomplete="off"');
+  const np = $("#uc-nopin"); if (np) np.onclick = async () => { if (confirm("Pašalinti PIN? Prie terminalo jis nebegalės prisijungti PIN kodu.") && await act(() => PUT(`/api/users/${uid}`, { pin: "" }), "PIN pašalintas")) pageUserCard(uid); };
+}
+
+function logTable(list, withTarget = true) {
+  return list.length ? `<div class="tbl"><table><thead><tr><th>Kada</th><th>Kas pakeitė</th>${withTarget ? "<th>Kam</th>" : ""}<th>Pakeitimas</th></tr></thead><tbody>
+    ${list.map(l => `<tr><td class="num">${dt(l.at)}</td><td>${esc(l.by_name || "sistema")}</td>
+      ${withTarget ? `<td>${l.target === "user" ? `<a href="#/admin/vartotojai/${esc(l.target_id)}">vartotojas</a>` : `<span class="tag">rolė</span> <span class="mono">${esc(l.target_id)}</span>`}</td>` : ""}
+      <td>${esc(l.summary)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Pakeitimų dar nebuvo.</p>`;
+}
+
+async function pageAccessLog() {
+  let target = "";
+  const draw = async () => {
+    const list = await GET(`/api/access_log${target ? `?target=${target}` : ""}`);
+    app().innerHTML = `<div class="row between"><h1>Teisių žurnalas</h1>
+      <select id="al-t" aria-label="Kam"><option value="">Visi pakeitimai</option><option value="user" ${target === "user" ? "selected" : ""}>Vartotojai</option><option value="role" ${target === "role" ? "selected" : ""}>Rolės</option></select></div>
+      <div class="card"><p class="muted small">Kas, kada ir kam keitė rolę, teises, darbo vietas, PIN ar slaptažodį (reikšmės nesaugomos). Įrašų ištrinti negalima – auditui (ISO 9001, ISO 3834).</p>${logTable(list)}</div>`;
+    $("#al-t").onchange = e => { target = e.target.value; draw(); };
+  };
+  await draw();
+}
+
+async function pageRoles() {
+  let roles = await GET("/api/roles");
+  const pending = {};                // rolės kodas → {perms:Set, scope}
+  const cur = r => pending[r.code] || { perms: new Set(r.perms), scope: r.scope };
+  const changed = () => Object.keys(pending).filter(c => { const r = roles.find(x => x.code === c), p = pending[c];
+    return p.scope !== r.scope || p.perms.size !== r.perms.length || r.perms.some(x => !p.perms.has(x)); });
+  const draw = () => {
+    const n = changed().length;
+    app().innerHTML = `<div class="row between"><h1>Rolės ir teisės</h1><button id="r-new">+ Nauja rolė</button></div>
+    <div class="card"><p class="muted small">Pažymėkite, ką kiekviena rolė gali. Pakeitimas galioja visiems tos rolės žmonėms nuo kito jų veiksmo.
+      Atskiram žmogui teisę pridėti ar atimti galima jo kortelėje. <b>Savo barai</b> – eilės, kalendorius, meistro patvirtinimai ir terminalas galioja tik vartotojui priskirtuose baruose, kitur – tik matyti.</p>
+      <div class="tbl mxwrap"><table class="mx"><thead><tr><th class="mxp">Teisė</th>${roles.map(r => `<th class="mxr">
+        <button class="linkb" data-re="${esc(r.code)}" title="${esc(r.description)}">${esc(r.name)}</button>
+        <div class="muted small">${r.users} žm.</div>
+        <select data-sc="${esc(r.code)}" aria-label="${esc(r.name)}: kur galioja" ${r.locked ? "disabled" : ""}><option value="all" ${cur(r).scope === "all" ? "selected" : ""}>visi barai</option><option value="own" ${cur(r).scope === "own" ? "selected" : ""}>savo barai</option></select></th>`).join("")}</tr></thead>
+      <tbody>${S.meta.perm_modules.map(m => `<tr class="mxm"><th colspan="${roles.length + 1}">${icon(m.key, "mico-s")} ${esc(m.label)}</th></tr>
+        ${m.perms.map(p => `<tr><td class="mxp" title="${esc(p.description)}">${esc(p.label)}${p.scoped ? ' <span class="tag" title="Galioja tik savo baruose, jei rolei taip nurodyta">baras</span>' : ""}<div class="muted small">${esc(p.description)}</div></td>
+          ${roles.map(r => { const on = cur(r).perms.has(p.key), dirty = pending[r.code] && on !== r.perms.includes(p.key);
+            return `<td class="mxc ${dirty ? "dirty" : ""}"><input type="checkbox" data-r="${esc(r.code)}" data-p="${p.key}" ${on ? "checked" : ""} ${r.locked ? "disabled" : ""}
+              aria-label="${esc(r.name)}: ${esc(p.label)}"></td>`; }).join("")}</tr>`).join("")}`).join("")}</tbody></table></div></div>
+    <div class="savebar" ${n ? "" : "hidden"}><span>Pakeista rolių: <b>${n}</b></span><button id="r-save">Išsaugoti</button><button class="ghost" id="r-undo">Atšaukti</button></div>`;
+    $$("[data-r]").forEach(c => c.onchange = () => {
+      const r = roles.find(x => x.code === c.dataset.r), p = pending[r.code] = cur(r);
+      c.checked ? p.perms.add(c.dataset.p) : p.perms.delete(c.dataset.p); draw();
+    });
+    $$("[data-sc]").forEach(s => s.onchange = () => { const r = roles.find(x => x.code === s.dataset.sc); (pending[r.code] = cur(r)).scope = s.value; draw(); });
+    const sv = $("#r-save"); if (sv) sv.onclick = async () => {
+      const list = changed();
+      const sum = list.map(c => { const r = roles.find(x => x.code === c), p = pending[c];
+        const plus = [...p.perms].filter(x => !r.perms.includes(x)), minus = r.perms.filter(x => !p.perms.has(x));
+        return `<li><b>${esc(r.name)}</b> (${r.users} žm.): ${plus.length ? `+ ${esc(plus.join(", "))} ` : ""}${minus.length ? `− ${esc(minus.join(", "))} ` : ""}${p.scope !== r.scope ? (p.scope === "own" ? "· tik savo barai" : "· visi barai") : ""}</li>`; }).join("");
+      modal(`<h2>Išsaugoti rolių pakeitimus?</h2><ul>${sum}</ul><p class="muted small">Įrašoma į teisių žurnalą.</p>
+        <div class="row"><button id="rs-ok">Išsaugoti</button><button class="ghost" id="rs-x">Atšaukti</button></div>`, () => {
+        $("#rs-x").onclick = closeModal;
+        $("#rs-ok").onclick = async () => {
+          for (const c of list) {
+            const p = pending[c];
+            if (!await act(() => PUT(`/api/roles/${c}`, { perms: [...p.perms], scope: p.scope }))) { closeModal(); return; }
+            delete pending[c];
+          }
+          closeModal(); toast("Rolės išsaugotos"); roles = await GET("/api/roles"); draw();
+        };
+      });
+    };
+    const un = $("#r-undo"); if (un) un.onclick = () => { Object.keys(pending).forEach(k => delete pending[k]); draw(); };
+    $("#r-new").onclick = () => modal(`<h2>Nauja rolė</h2><form id="rn" class="stack">
+      <label>Pavadinimas<input name="name" required placeholder="pvz. Dažymo meistras" id="rn-name"></label>
+      <label>Kodas <span class="muted small">(lotyniškai, nesikeičia)</span><input name="code" required pattern="[a-z][a-z0-9_]{1,23}" placeholder="meistras_dazymo" id="rn-code"></label>
+      <label>Teises nukopijuoti iš<select name="copy_from" id="rn-copy"><option value="">— tik „Matyti“ —</option>${roles.map(r => `<option value="${esc(r.code)}">${esc(r.name)}</option>`).join("")}</select></label>
+      <label>Aprašymas<input name="description" id="rn-d" placeholder="kam skirta"></label>
+      <div class="row"><button>Sukurti</button><button type="button" class="ghost" id="rn-x">Atšaukti</button></div></form>`, () => {
+      $("#rn-x").onclick = closeModal;
+      $("#rn-name").oninput = e => { const c = $("#rn-code"); if (!c.dataset.touched) c.value = e.target.value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24); };
+      $("#rn-code").oninput = e => (e.target.dataset.touched = 1);
+      $("#rn").onsubmit = async e => { e.preventDefault(); if (await act(() => POST("/api/roles", formData(e.target)), "Rolė sukurta")) { closeModal(); roles = await GET("/api/roles"); draw(); } };
+    });
+    $$("[data-re]").forEach(b => b.onclick = () => {
+      const r = roles.find(x => x.code === b.dataset.re);
+      modal(`<h2>Rolė „${esc(r.name)}“</h2><p class="muted small mono">${esc(r.code)} · ${r.users} aktyvūs vartotojai${r.system ? " · įprasta rolė" : ""}</p>
+        <label>Pavadinimas<input id="re-n" value="${esc(r.name)}"></label><label>Aprašymas<input id="re-d" value="${esc(r.description)}"></label>
+        <div class="row"><button id="re-ok">Įrašyti</button>${!r.system ? `<button class="ghost" id="re-del" ${r.users ? "disabled title='Rolę dar turi vartotojai'" : ""}>Pašalinti rolę</button>` : ""}
+          <a class="btn ghost" href="#/admin/vartotojai" id="re-u">Vartotojai</a><button class="ghost" id="re-x">Uždaryti</button></div>`, () => {
+        $("#re-x").onclick = closeModal;
+        $("#re-u").onclick = () => { try { sessionStorage.setItem("pf.urole", r.code); } catch {} closeModal(); };
+        $("#re-ok").onclick = async () => { if (await act(() => PUT(`/api/roles/${r.code}`, { name: $("#re-n").value, description: $("#re-d").value }), "Įrašyta")) { closeModal(); roles = await GET("/api/roles"); draw(); } };
+        const d = $("#re-del"); if (d) d.onclick = async () => { if (confirm(`Pašalinti rolę „${r.name}“?`) && await act(() => api("DELETE", `/api/roles/${r.code}`), "Rolė pašalinta")) { closeModal(); roles = await GET("/api/roles"); draw(); } };
+      });
+    });
+  };
+  draw();
+}
+
+async function pageCentresAdmin() {
   const [users, centres, areas] = await Promise.all([GET("/api/users"), GET("/api/centres?all=1"), GET("/api/areas")]);
-  const masters = users.filter(u => u.active && ["meistras", "admin", "vadovas"].includes(u.role));
+  const masters = users.filter(u => u.active && u.perms.includes("ack_rev"));
   const areaOpts = sel => opt(areas.map(a => ({ id: a.id, name: a.name })), sel, "Be baro");
-  app().innerHTML = `<h1>Administravimas</h1>
-  <div class="card"><h2>Vartotojai</h2><div class="tbl"><table><thead><tr><th>Vardas</th><th>Prisijungimas</th><th>Rolė</th><th>Darbo centrai</th><th>PIN</th><th>Aktyvus</th><th></th></tr></thead>
-    <tbody>${users.map(u => `<tr class="${u.active ? "" : "dim"}"><td>${esc(u.name)}</td><td class="mono">${esc(u.login)}</td>
-      <td><select data-u="${u.id}" data-f="role" id="u-r-${u.id}">${opt(S.meta.roles, u.role)}</select></td>
-      <td><input data-u="${u.id}" data-f="centres" value="${esc(u.centres.join(","))}" placeholder="visi" title="Centrų (SV-01) arba barų (SVB) kodai per kablelį" style="width:140px" id="u-c-${u.id}"></td>
-      <td>${u.has_pin ? "yra" : "—"}</td><td><input type="checkbox" data-u="${u.id}" data-f="active" ${u.active ? "checked" : ""} id="u-a-${u.id}"></td>
-      <td><button class="small ghost" data-pw="${u.id}">Slaptažodis / PIN</button></td></tr>`).join("")}</tbody></table></div>
-    <form id="nu" class="inline"><label>Vardas<input name="name" required id="nu-name"></label><label>Prisijungimas<input name="login" required id="nu-login"></label>
-      <label>Rolė<select name="role" id="nu-role">${opt(S.meta.roles, "operatorius")}</select></label><label>Slaptažodis<input name="password" type="password" required id="nu-pw"></label>
-      <label>PIN<input name="pin" inputmode="numeric" style="width:80px" id="nu-pin"></label><label>Centrai ar barai<input name="centres" placeholder="SVB arba SV-01,SV-02" id="nu-c"></label>
-      <button class="ghost">Pridėti vartotoją</button></form></div>
+  app().innerHTML = `<h1>Barai ir darbo centrai</h1>
   <div class="card"><h2>Gamybos barai</h2>
     <p class="muted">Baro kodą galima priskirti vartotojui vietoje atskirų centrų – tada jis mato visus to baro centrus, ir naujus taip pat.</p>
     <div class="tbl"><table><thead><tr><th>Kodas</th><th>Pavadinimas</th><th>Meistras</th><th>Centrų</th><th>Aktyvus</th></tr></thead>
@@ -2144,35 +2453,19 @@ async function pageAdmin() {
     <form id="nc" class="inline"><label>Kodas<input name="code" required style="width:100px" id="nc-code"></label><label>Pavadinimas<input name="name" required id="nc-name"></label>
       <label>Baras<select name="area_id" id="nc-area">${areaOpts("")}</select></label>
       <label>Rūšis<select name="kind" id="nc-kind">${opt(S.meta.centre_kinds)}</select></label><button class="ghost">Pridėti centrą</button></form></div>`;
-  const splitC = v => v.split(",").map(x => x.trim()).filter(Boolean);
-  $$("[data-u]").forEach(el => el.onchange = async () => {
-    const f = el.dataset.f;
-    const v = f === "active" ? el.checked : f === "centres" ? splitC(el.value) : el.value;
-    try { await act(() => PUT(`/api/users/${el.dataset.u}`, { [f]: v }), "Įrašyta"); } finally { pageAdmin(); }
-  });
   $$("[data-c]").forEach(el => el.onchange = async () => {
     const f = el.dataset.f;
-    await act(() => PUT(`/api/centres/${el.dataset.c}`, { [f]: el.type === "checkbox" ? (el.checked ? 1 : 0) : f === "area_id" ? (el.value ? +el.value : null) : el.value }), "Įrašyta"); pageAdmin();
+    await act(() => PUT(`/api/centres/${el.dataset.c}`, { [f]: el.type === "checkbox" ? (el.checked ? 1 : 0) : f === "area_id" ? (el.value ? +el.value : null) : el.value }), "Įrašyta"); pageCentresAdmin();
   });
-  $$("[data-pw]").forEach(b => b.onclick = () => modal(`<h2>Slaptažodis ir PIN</h2>
-    <label>Naujas slaptažodis<input id="m-pw" type="password"></label><label>Naujas PIN (tuščias – nekeisti, „-“ – pašalinti)<input id="m-pin" inputmode="numeric"></label>
-    <div class="row"><button id="m-ok">Įrašyti</button><button class="ghost" id="m-x">Atšaukti</button></div>`, () => {
-    $("#m-x").onclick = closeModal;
-    $("#m-ok").onclick = async () => {
-      const body = {}; const pw = $("#m-pw").value, pin = $("#m-pin").value;
-      if (pw) body.password = pw; if (pin) body.pin = pin === "-" ? "" : pin;
-      await act(() => PUT(`/api/users/${b.dataset.pw}`, body), "Įrašyta"); closeModal(); pageAdmin();
-    };
-  }));
-  $("#nu").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.centres = splitC(d.centres || ""); await act(() => POST("/api/users", d), "Vartotojas sukurtas"); pageAdmin(); };
-  $("#nc").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.area_id = d.area_id ? +d.area_id : null; await act(() => POST("/api/centres", d), "Centras sukurtas"); pageAdmin(); };
+  $("#nc").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.area_id = d.area_id ? +d.area_id : null; await act(() => POST("/api/centres", d), "Centras sukurtas"); pageCentresAdmin(); };
   $$("[data-ar]").forEach(el => el.onchange = async () => {
     const f = el.dataset.f;
     const v = f === "active" ? (el.checked ? 1 : 0) : f === "master_id" ? (el.value ? +el.value : null) : el.value;
-    try { await act(() => PUT(`/api/areas/${el.dataset.ar}`, { [f]: v }), "Įrašyta"); } finally { pageAdmin(); }
+    try { await act(() => PUT(`/api/areas/${el.dataset.ar}`, { [f]: v }), "Įrašyta"); } finally { pageCentresAdmin(); }
   });
-  $("#na").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.master_id = d.master_id ? +d.master_id : null; await act(() => POST("/api/areas", d), "Baras sukurtas"); pageAdmin(); };
+  $("#na").onsubmit = async e => { e.preventDefault(); const d = formData(e.target); d.master_id = d.master_id ? +d.master_id : null; await act(() => POST("/api/areas", d), "Baras sukurtas"); pageCentresAdmin(); };
 }
+
 
 // ---------- komponentų pirkimai ----------
 const compStatusCls = st => ({ reikia: "atvira", uzsakyta: "laukia", patvirtinta: "gali", dalinai: "pristabdyta", gauta: "baigta", atsaukta: "tuscia" }[st] || st);

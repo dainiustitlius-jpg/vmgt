@@ -230,6 +230,10 @@ def waive(con, user, check_id, reason: str) -> dict:
     if not (reason or "").strip():
         raise RuleError("Nurodykite išimties priežastį")
     c = _check(con, check_id)
+    if "quality" not in _perms(user):
+        from .auth import require_at
+        t = _task(con, c["task_id"])
+        require_at(user, "ack_rev", t["centre_code"], t["area_code"])     # meistras – savo baruose
     if c["status"] in ("ok", "isimtis"):
         raise RuleError("Patikra jau užbaigta")
     now = db.now()

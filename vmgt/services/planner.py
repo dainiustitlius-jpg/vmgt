@@ -203,7 +203,9 @@ def _apply(con, user, change: dict):
         projects.save_project(con, user["id"], {"priority": pr}, change["project_id"])
         return change["project_id"]
     if kind == "queue":
+        from .auth import require_at
         t = tasks._task(con, change.get("task_id"))
+        require_at(user, "plan", t["centre_code"], t["area_code"])     # meistras – tik savo barų eiles
         tasks.move(con, user["id"], t["id"], change.get("where", ""))
         return t["project_id"]
     if kind == "activate":

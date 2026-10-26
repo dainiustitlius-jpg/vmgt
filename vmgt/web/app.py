@@ -18,6 +18,7 @@ from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
                         importer, layout, meetings, ncfiles, ncr, planner, projects, quality, routing, seed,
                         signals, tasks, workcal)
+from ..services import home as homepage
 from ..services.forecast import forecast
 
 STATIC = Path(__file__).parent / "static"
@@ -31,6 +32,8 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     con = db.connect(cfg.db_path)
     db.migrate(con)
+    auth.ensure_roles(con)
+    con.commit()
     if cfg.seed_sample and seed.is_empty(con):
         seed.seed(con, cfg.files_dir, nc_dir=cfg.nc_path, demo_projects=cfg.seed_demo)
     con.close()
@@ -90,7 +93,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
             raise
         failed.pop(ip, None)
         response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=cfg.session_hours * 3600)
-        return auth.public_user(u)
+        return auth.public_user(auth.load_perms(con, u))
 
     @app.post("/api/logout")
     def logout(request: Request, response: Response, con=Depends(get_con)):
@@ -101,10 +104,13 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/me")
-    def me(user=Depends(get_user)):
+    def me(user=Depends(get_user), con=Depends(get_con)):
         return {
             "user": auth.public_user(user),
-            "roles": [{"key": k, "label": v[0]} for k, v in auth.ROLES.items()],
+            "roles": [{"key": r["code"], "label": r["name"]} for r in auth.list_roles(con)],
+            "perm_modules": [{"key": k, "label": l, "perms": [{"key": p, "label": pl, "description": auth.PERMS[p],
+                                                               "scoped": p in auth.SCOPED} for p, pl in ps]}
+                             for k, l, ps in auth.MODULES],
             "phase_kinds": [{"key": k, "label": v} for k, v in projects.PHASE_KINDS],
             "project_statuses": [{"key": k, "label": v} for k, v in projects.PROJECT_STATUSES],
             "centre_kinds": [{"key": k, "label": v} for k, v in projects.CENTRE_KINDS],
@@ -226,7 +232,10 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.get("/api/centres")
     def centre_list(all: int = 0, user=Depends(get_user), con=Depends(get_con)):
         out = projects.list_centres(con, active_only=not all)
-        return [c for c in out if auth.can_centre(user, c["code"], c["area_code"])] if not all else out
+        # kas mato cechą (`view`) – mato visus centrus; operatorius – tik savo
+        if all or "view" in auth.perms_of(user):
+            return out
+        return [c for c in out if auth.can_centre(user, c["code"], c["area_code"])]
 
     @app.post("/api/centres")
     def centre_new(body: dict, user=Depends(need("admin")), con=Depends(get_con)):
@@ -257,16 +266,35 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
                  con=Depends(get_con)):
         return workcal.year_view(con, scope, id, year or int(db.now()[:4]))
 
+    def cal_scope(con, user, scope, sid):
+        """Meistras (rolė „savo baruose“) keičia tik savo barų ir centrų
+        kalendorių; gamyklos kalendorius ir bendri šablonai – ne jo."""
+        if auth.scope_of(user) == "all":
+            return
+        if scope == "area":
+            r = con.execute("SELECT code FROM areas WHERE id=?", (int(sid or 0),)).fetchone()
+            if r and auth.can_centre(user, "", r[0]):
+                return
+        elif scope == "centre":
+            r = con.execute("SELECT c.code, ar.code FROM work_centres c LEFT JOIN areas ar ON ar.id=c.area_id "
+                            "WHERE c.id=?", (int(sid or 0),)).fetchone()
+            if r and auth.can_centre(user, r[0], r[1]):
+                return
+        raise RuleError("Galite keisti tik savo barų ir jų centrų kalendorių" if scope != "factory" else
+                        "Gamyklos kalendorių ir pamainų šablonus keičia planuotojas ar vadovas – jūs – savo barų")
+
     @app.get("/api/calendar/patterns")
     def cal_patterns(user=Depends(need("view")), con=Depends(get_con)):
         return workcal.list_patterns(con)
 
     @app.post("/api/calendar/patterns")
     def cal_pattern_new(body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        cal_scope(con, user, "factory", 0)
         return {"id": workcal.save_pattern(con, user["id"], body)}
 
     @app.put("/api/calendar/patterns/{pid}")
     def cal_pattern_put(pid: int, body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        cal_scope(con, user, "factory", 0)
         # šablono pakeitimas keičia visų jį naudojančių darbo laiką – su poveikiu
         def do():
             workcal.save_pattern(con, user["id"], body, pid)
@@ -275,6 +303,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.put("/api/calendar/pattern")
     def cal_set_pattern(body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        cal_scope(con, user, body.get("scope"), body.get("scope_id"))
         def do():
             workcal.set_pattern(con, user["id"], body.get("scope"), body.get("scope_id"), body.get("pattern_id"))
             v = workcal.year_view(con, body.get("scope"), body.get("scope_id"), int(db.now()[:4]))
@@ -284,6 +313,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.post("/api/calendar/days")
     def cal_days(body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        cal_scope(con, user, body.get("scope"), body.get("scope_id"))
         return planner.calendar_change(con, user, lambda: workcal.set_days(con, user["id"], body), body.get("note", ""))
 
     # ---------- planuotojo Gantt, poveikis, signalai ----------
@@ -334,6 +364,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.post("/api/plan/{code}/approve")
     def plan_approve(code: str, user=Depends(need("plan")), con=Depends(get_con)):
         c = projects.centre_by_code(con, code)
+        auth.require_at(user, "plan", c["code"], c["area_code"])
         return {"approved": tasks.approve_queue(con, user["id"], c["id"])}
 
     # ---------- terminalas ----------
@@ -837,7 +868,43 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.get("/api/users")
     def user_list(user=Depends(need("view")), con=Depends(get_con)):
-        return [auth.public_user(u) for u in db.rows(con.execute("SELECT * FROM users ORDER BY name"))]
+        return [auth.public_user(auth.load_perms(con, u)) for u in db.rows(con.execute("SELECT * FROM users ORDER BY name"))]
+
+    @app.get("/api/users/{uid}")
+    def user_get(uid: int, user=Depends(need("admin")), con=Depends(get_con)):
+        u = db.row(con.execute("SELECT * FROM users WHERE id=?", (uid,)))
+        if not u:
+            raise NotFound("Vartotojo nėra")
+        last = con.execute("SELECT MAX(at) FROM events WHERE entity='user' AND entity_id=? AND action='login'",
+                           (uid,)).fetchone()[0]
+        return {**auth.public_user(auth.load_perms(con, u)), "modules": auth.describe(con, u), "last_login": last,
+                "log": auth.access_log(con, "user", uid, 50)}
+
+    @app.get("/api/roles")
+    def role_list(user=Depends(need("admin")), con=Depends(get_con)):
+        return auth.list_roles(con)
+
+    @app.post("/api/roles")
+    def role_new(body: dict, user=Depends(need("admin")), con=Depends(get_con)):
+        return {"code": auth.save_role(con, user["id"], body.get("code"), body, new=True)}
+
+    @app.put("/api/roles/{code}")
+    def role_put(code: str, body: dict, user=Depends(need("admin")), con=Depends(get_con)):
+        return {"code": auth.save_role(con, user["id"], code, body)}
+
+    @app.delete("/api/roles/{code}")
+    def role_del(code: str, user=Depends(need("admin")), con=Depends(get_con)):
+        auth.delete_role(con, user["id"], code)
+        return {"ok": True}
+
+    @app.get("/api/access_log")
+    def access_log(target: str | None = None, id: str | None = None, user=Depends(need("admin")),
+                   con=Depends(get_con)):
+        return auth.access_log(con, target, id, 300)
+
+    @app.get("/api/home")
+    def home(user=Depends(get_user), con=Depends(get_con)):
+        return homepage.tiles(con, user)
 
     @app.post("/api/users")
     def user_new(body: dict, user=Depends(need("admin")), con=Depends(get_con)):
@@ -848,7 +915,8 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.put("/api/users/{uid}")
     def user_put(uid: int, body: dict, user=Depends(need("admin")), con=Depends(get_con)):
         auth.update_user(con, uid, user["id"], **{k: body.get(k) for k in
-                                                  ("name", "role", "centres", "password", "pin", "active")})
+                                                  ("name", "role", "centres", "password", "pin", "active",
+                                                   "perm_add", "perm_remove")})
         return {"ok": True}
 
     # ---------- puslapiai ----------

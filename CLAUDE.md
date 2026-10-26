@@ -27,6 +27,13 @@ kataloge (`host`, `port`, `data_dir`, `seed_sample`, `seed_demo`, `session_hours
 nėra – numatytosios. Duomenys – `data/` (`vmgt.db`, įkelti brėžiniai
 `data/files/`), į git neįtraukiami.
 
+**Įmonės vidinis tinklas** (2026-10-26). `host` numatytas `0.0.0.0` – VMGT
+priima jungtis iš viso tinklo; paleidus spausdinami adresai kitiems
+kompiuteriams (`__main__.lan_addresses`). `leisti_tinkle.bat` (vieną kartą,
+administratoriaus teisės) – Windows ugniasienės taisyklė „VMGT“ TCP
+prievadui tik domeno ir privačiame tinkle. Iš interneto nepasiekiama
+(nėra HTTPS) – išorei tik per VPN ar tarpinį serverį su sertifikatu.
+
 **Testinė aplinka (nuo 2026-10-24) – be integracijų.** Tuščia bazė užpildoma
 pavyzdžiais (`services/seed.py`): 3 projektai su žyme PAVYZDYS, 10 darbo
 centrų, dalis darbų „atlikta“ praeityje, kad cechas ir analitika turėtų ką

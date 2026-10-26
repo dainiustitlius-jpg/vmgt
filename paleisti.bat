@@ -12,6 +12,6 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo Narsykleje atidarykite http://localhost:8080  (sustabdyti - uzdarykite si langa)
+echo Narsykleje atidarykite http://localhost:8080 - kitu kompiuteriu adresas parodytas zemiau (sustabdyti - uzdarykite si langa)
 py -m vmgt
 pause

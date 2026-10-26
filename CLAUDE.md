@@ -83,6 +83,7 @@ pagrindiniai pavyzdžiai. Testai (`sample_client`) – be demo; `test_demo.py` �
 | `services/planner.py` | Planuotojo Gantt pagal departamentus, pakeitimų poveikis (SAVEPOINT + apkrovos palyginimas), įrašymas |
 | `services/signals.py` | Pokyčių signalai ir pranešimai: planuotojo pakeitimai, vėlavimai ceche, komponentai, nauji projektai |
 | `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
+| `services/layout.py` | Cecho planas: barų ir centrų išdėstymas, būsenos, įspėjimai, detalių judėjimas, projekto kelias |
 | `services/seed.py`, `demo.py` | Pavyzdiniai duomenys; `demo` – 5 projektai su visa istorija |
 | `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
 | `vmgt/web/static/` | `index.html`, `app.js` (hash maršrutai), `app.css` – be surinkimo įrankio |
@@ -191,6 +192,28 @@ ceche, komponentų vėlavimai, nauji projektai iš krepšelio**.
 
 `test_planavimas.py`. Pavyzdžiuose signalai susidaro iš demo istorijos
 (vėlavimai ceche, nauji projektai, vėluojantys komponentai).
+
+## Cecho planas (nuo 2026-10-26)
+
+Vartotojo prašymas: preliminarus interaktyvus cecho planas su išdėstytais
+barais ir centrais, matomi centrų statusai. Sprendimai: **redaguojamas
+nutempiant** (preliminarų sudeda sistema); plane – **dabartinis darbas ir
+laikmatis, detalių judėjimas, projekto filtras, įspėjimai**; vieta – lange
+**„Cechas“ kaip skirtukas** (`#/cechas/planas`, numatytas; `#/cechas/korteles`
+– ankstesnės kortelės; paskutinis pasirinkimas – `localStorage pf.floorView`).
+
+| | |
+|---|---|
+| išdėstymas | `layout.auto_layout`: barai iš kairės į dešinę `areas.sort` (technologinio srauto) tvarka, eilutėmis iki 110 m; centrai – tinkleliu baro viduje (8×6 m). Vieta – `areas.layout`, `work_centres.layout` (migracija 11, JSON {x,y,w,h}, sąlyginiai metrai; centro – baro viduje, tad perkeliant barą keliauja kartu). NULL – automatinė, todėl naujas centras plane atsiranda pats |
+| redagavimas | „Redaguoti išdėstymą“ (teisė `admin`): tempti barą / centrą, kampo kvadratėliu – dydis (žingsnis 0,5 m), centras lieka baro viduje; „Išsaugoti“ / „Atšaukti“ / „Automatinis“ (`PUT /api/floor/layout`, `reset`). Tempiant keičiamas tik tempiamas SVG elementas – perpiešus visą SVG naršyklė prarasdavo tempimą po pirmo judesio (rasta Playwright) |
+| būsenos | tos pačios kaip kortelėse (`analytics.floor`): dirba (žalia, mirksi lemputė), pristabdyta, gali pradėti, laukia (užrakinta, raudonas brūkšninis), laisvas; ant centro – projektas · mazgas, operacija, laikmatis (kaip terminale: uždarytų intervalų suma + naršyklė prideda atvirą) arba eilės ilgis |
+| įspėjimai | `layout._alerts`: neplanuota pauzė ≥ 60 min. (raudona), vykdoma > 125 % normos, atvira neatitiktis, failas laukia meistro – mirksintis „!“, sąrašas centro lange |
+| detalės | ⧗N – atkeliavusios ir laukiančios detalės (`routing.arrived`, susiliejusios – 1); rodyklės – šiandien perduota (`transfers`), ant rodyklės – vnt. |
+| projektas | pasirinkus – kiti centrai blankūs, projekto centrai oranžiniu kraštu su ✓ atlikta ▶ vyksta ○ laukia, rodyklės – maršruto kelias (ištisinė – praeita, brūkšninė – dar ne) |
+| kita | spustelėjus centrą – langas su darbu, įspėjimais, nuorodomis į terminalą ir eilę; „Visas ekranas“ – sieniniam ekranui; atsinaujina kas 10 s; telefone – slenkama kortelėje |
+
+Klasės: plano rodyklės – `.fmove` (`.flow` jau terminalo srauto eilutė).
+`test_cecho_planas.py`.
 
 ## Resursų apkrova (nuo 2026-10-25)
 

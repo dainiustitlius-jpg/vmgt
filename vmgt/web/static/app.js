@@ -87,7 +87,7 @@ const ROUTES = [
   [/^#\/m\/(\d+)$/, pageMeeting],
   [/^#\/m\/(naujas)\/(\d+)$/, pageMeetingEdit],
   [/^#\/m\/(\d+)\/keisti$/, pageMeetingEdit],
-  [/^#\/cechas$/, pageFloor],
+  [/^#\/cechas(?:\/(planas|korteles))?$/, pageFloor],
   [/^#\/planas(?:\/([\w-]+))?$/, pagePlan],
   [/^#\/t(?:\/([\w-]+))?$/, pageTerminal],
   [/^#\/r\/(\d+)(?:\/d\/([^/]+))?$/, pageRoute],
@@ -718,7 +718,12 @@ function centreOptions(centres, sel) {
 }
 
 // ---------- cechas ----------
-async function pageFloor() {
+const floorTabs = on => `<nav class="tabs"><a href="#/cechas/planas" class="${on === "p" ? "on" : ""}">Cecho planas</a><a href="#/cechas/korteles" class="${on === "k" ? "on" : ""}">Kortelės</a></nav>`;
+
+async function pageFloor(view) {
+  if (!view) { try { view = localStorage.getItem("pf.floorView") || "planas"; } catch { view = "planas"; } }
+  try { localStorage.setItem("pf.floorView", view); } catch {}
+  if (view === "planas") return pageFloorPlan();
   const draw = async () => {
     const r = await GET("/api/floor");
     const label = { dirba: "Dirba", pristabdyta: "Pristabdyta", gali: "Gali pradėti", laukia: "Laukia", tuscia: "Eilėje nėra" };
@@ -740,6 +745,7 @@ async function pageFloor() {
         <div class="muted">Eilėje: ${s.queue}</div></a>`;
     };
     app().innerHTML = `<div class="row between"><h1>Cecho būsena</h1><span class="muted">atnaujinama kas 10 s</span></div>
+    ${floorTabs("k")}
     <div class="chips"><button class="${sel ? "ghost" : ""}" data-area="">Visi barai</button>${groups.map(g =>
       `<button class="${sel === g.code ? "" : "ghost"}" data-area="${esc(g.code)}">${esc(g.name)}</button>`).join("")}</div>
     ${groups.filter(g => !sel || g.code === sel).map(g => `<section class="area">
@@ -753,6 +759,154 @@ async function pageFloor() {
   await draw();
   S.timers.push(setInterval(draw, 10000));
   S.timers.push(setInterval(() => $$("[data-since]").forEach(el => el.dataset.since && (el.textContent = dur(+el.dataset.base + since(el.dataset.since)))), 1000));
+}
+
+// ---------- cecho planas: barai ir centrai kaip ceche, su gyvomis būsenomis ----------
+// Koordinatės – sąlyginiais metrais (SVG viewBox). Centro vieta – baro viduje.
+const ST_LABEL = { dirba: "Dirba", pristabdyta: "Pristabdyta", gali: "Gali pradėti", laukia: "Laukia", tuscia: "Laisvas" };
+const cut = (s, n) => (s = String(s ?? "")).length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s;
+
+async function pageFloorPlan() {
+  let pid = "", flows = true, edit = false, model = null, data = null;
+  try { pid = localStorage.getItem("pf.fproj") || ""; flows = localStorage.getItem("pf.fflow") !== "0"; } catch {}
+  const centreAbs = (a, c) => ({ x: a.box.x + c.box.x, y: a.box.y + c.box.y, w: c.box.w, h: c.box.h });
+
+  const render = () => {
+    const r = model, ov = data.project;
+    const W = Math.max(r.size.w, 40) + (edit ? 30 : 2), H = Math.max(r.size.h, 20) + (edit ? 20 : 2);
+    const byId = {};
+    r.areas.forEach(a => a.centres.forEach(c => (byId[c.id] = { a, c })));
+    const mid = id => { const o = byId[id]; if (!o) return null; const b = centreAbs(o.a, o.c); return [b.x + b.w / 2, b.y + b.h / 2]; };
+    const arrow = (f, t, cls, label) => {
+      const p1 = mid(f), p2 = mid(t); if (!p1 || !p2) return "";
+      const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2, dx = p2[0] - p1[0], dy = p2[1] - p1[1], len = Math.hypot(dx, dy) || 1;
+      const cx = mx - dy / len * Math.min(6, len / 4), cy = my + dx / len * Math.min(6, len / 4);   // lenkta, kad nesutaptų su priešinga
+      return `<path class="${cls}" d="M${p1[0]},${p1[1]} Q${cx},${cy} ${p2[0]},${p2[1]}" marker-end="url(#${cls.includes("proj") ? "arP" : "arF"})"/>`
+        + (label ? `<text class="flabel" x="${(mx + cx) / 2}" y="${(my + cy) / 2}">${esc(label)}</text>` : "");
+    };
+    const inProj = id => ov && ov.centres[id];
+    const centre = (a, c) => {
+      const b = c.box, t = c.task, pc = inProj(c.id), n = Math.floor(b.w * 1.45);
+      const alert = c.alerts.length ? c.alerts.some(x => x.severity === "red") ? "red" : "yellow" : "";
+      const timer = (c.state === "dirba" || c.state === "pristabdyta") && t;
+      return `<g class="fc st-${c.state} ${ov && !pc ? "dim" : ""} ${pc ? "inproj" : ""}" data-c="${c.id}" data-a="${a.id}" transform="translate(${b.x},${b.y})" tabindex="0" role="button" aria-label="${esc(c.code)} ${esc(ST_LABEL[c.state])}">
+        <rect class="fcr" width="${b.w}" height="${b.h}" rx="0.4"/>
+        <circle class="led" cx="${b.w - 0.9}" cy="0.9" r="0.45"/>
+        <text class="fcode" x="0.6" y="1.5">${esc(cut(c.code, n - 2))}</text>
+        <text class="fsub" x="0.6" y="2.7">${esc(cut(t ? `${t.project_code} · ${t.assembly_code}` : c.next ? `Kitas: ${c.next.project_code}` : c.name, n))}</text>
+        ${t ? `<text class="fsub" x="0.6" y="3.8">${esc(cut(t.name, n))}</text>` : ""}
+        ${timer ? `<text class="ftime" x="0.6" y="${b.h - 0.6}" data-since="${c.state === "dirba" ? esc(c.since || "") : ""}" data-base="${c.work_s || 0}">${dur((c.work_s || 0) + (c.state === "dirba" && c.since ? since(c.since) : 0))}</text>`
+          : `<text class="fsub" x="0.6" y="${b.h - 0.6}">eilėje ${c.queue}</text>`}
+        ${c.waiting ? `<g class="fwait" transform="translate(${b.w - 2.6},${b.h - 1.9})"><rect width="2.2" height="1.4" rx="0.3"/><text x="1.1" y="1.05">⧗${c.waiting}</text></g>` : ""}
+        ${alert ? `<g class="falert ${alert}" transform="translate(-0.7,-0.7)"><circle r="0.85" cx="0.85" cy="0.85"/><text x="0.85" y="1.3">!</text></g>` : ""}
+        ${pc ? `<text class="fproj" x="0.6" y="${b.h + 1.1}">✓${pc.done} ▶${pc.running} ○${pc.open}</text>` : ""}
+        ${edit ? `<rect class="rz" data-rz="c" x="${b.w - 1}" y="${b.h - 1}" width="1" height="1"/>` : ""}
+      </g>`;
+    };
+    $("#fplan").innerHTML = `<svg viewBox="-1 -1 ${W} ${H}" class="fsvg ${edit ? "editing" : ""}" id="fsvg">
+      <defs><marker id="arF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arF"/></marker>
+        <marker id="arP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arP"/></marker></defs>
+      ${r.areas.map(a => `<g class="farea" data-area="${a.id}" transform="translate(${a.box.x},${a.box.y})">
+        <rect class="far" width="${a.box.w}" height="${a.box.h}" rx="0.5"/>
+        <text class="fname" x="0.8" y="2.2">${esc(cut(a.name, Math.floor((a.box.w - 7) * 1.15)))}</text>
+        <text class="fcount" x="${a.box.w - 0.8}" y="2.2">${a.centres.filter(c => c.state === "dirba").length}/${a.centres.length} dirba</text>
+        ${a.centres.map(c => centre(a, c)).join("")}
+        ${edit ? `<rect class="rz" data-rz="a" x="${a.box.w - 1.4}" y="${a.box.h - 1.4}" width="1.4" height="1.4"/>` : ""}</g>`).join("")}
+      ${!edit && flows ? data.flows.map(f => arrow(f.from_id, f.to_id, "fmove", `${f.qty}`)).join("") : ""}
+      ${!edit && ov ? ov.edges.map(e => arrow(e.from_id, e.to_id, `proj ${e.done ? "done" : ""}`)).join("") : ""}
+    </svg>`;
+    if (edit) wireEdit(); else $$("#fsvg .fc").forEach(g => { g.onclick = () => centreModal(byId[g.dataset.c].c, byId[g.dataset.c].a); g.onkeydown = e => e.key === "Enter" && g.onclick(); });
+  };
+
+  const draw = async () => {
+    data = await GET(`/api/floor/plan${pid ? `?project_id=${pid}` : ""}`);
+    if (!edit) model = JSON.parse(JSON.stringify(data));
+    const all = data.areas.flatMap(a => a.centres), n = st => all.filter(c => c.state === st).length;
+    const alerts = all.filter(c => c.alerts.length).length;
+    app().innerHTML = `<div class="row between"><h1>Cecho būsena</h1>
+      <div class="row"><span class="muted small">atnaujinama kas 10 s</span><button class="ghost small" id="f-full" title="Visas ekranas – sieniniam ekranui">⛶ Visas ekranas</button></div></div>
+    ${floorTabs("p")}
+    <div class="row between ftools">
+      <div class="row">${pill("dirba", `dirba ${n("dirba")}`)} ${pill("pristabdyta", `pristabdyta ${n("pristabdyta")}`)} ${pill("gali", `gali pradėti ${n("gali")}`)} ${pill("laukia", `laukia ${n("laukia")}`)}
+        ${alerts ? `<span class="sev red">įspėjimų: ${alerts}</span>` : ""}</div>
+      <div class="row">
+        <label class="row" style="display:flex"><input type="checkbox" id="f-flow" ${flows ? "checked" : ""}> šiandienos detalių judėjimas</label>
+        <select id="f-proj" aria-label="Projektas"><option value="">Visi projektai</option>${data.projects.map(p => `<option value="${p.id}" ${String(p.id) === pid ? "selected" : ""}>${esc(p.code)} ${esc(p.name)}</option>`).join("")}</select>
+        ${can("admin") ? (edit ? `<button id="f-save">Išsaugoti išdėstymą</button><button class="ghost" id="f-cancel">Atšaukti</button><button class="ghost" id="f-reset">Automatinis</button>`
+          : `<button class="ghost" id="f-edit">Redaguoti išdėstymą</button>`) : ""}</div></div>
+    ${edit ? `<p class="warn">Redagavimas: tempkite barus (už pavadinimo ar tuščios vietos) ir centrus, kampo kvadratėliu keiskite dydį. Centras lieka savo baro viduje.</p>` : ""}
+    <div class="card fwrap" id="fwrap"><div id="fplan"></div>
+      <div class="flegend muted small"><span><i class="lg st-dirba"></i>dirba</span><span><i class="lg st-pristabdyta"></i>pristabdyta</span><span><i class="lg st-gali"></i>gali pradėti</span>
+        <span><i class="lg st-laukia"></i>laukia (užrakinta)</span><span><i class="lg st-tuscia"></i>laisvas</span><span>⧗ – atkeliavusios detalės laukia</span><span class="lgal">!</span> įspėjimas
+        ${flows ? `<span>→ šiandien perduota (vnt.)</span>` : ""}${data.project ? `<span class="lgp">→ ${esc(data.project.code)} kelias (✓ atlikta ▶ vyksta ○ laukia)</span>` : ""}</div></div>`;
+    $("#f-flow").onchange = e => { flows = e.target.checked; try { localStorage.setItem("pf.fflow", flows ? "1" : "0"); } catch {} draw(); };
+    $("#f-proj").onchange = e => { pid = e.target.value; try { localStorage.setItem("pf.fproj", pid); } catch {} draw(); };
+    $("#f-full").onclick = () => { const w = $("#fwrap"); document.fullscreenElement ? document.exitFullscreen() : w.requestFullscreen && w.requestFullscreen(); };
+    const ed = $("#f-edit"); if (ed) ed.onclick = () => { edit = true; draw(); };
+    const ca = $("#f-cancel"); if (ca) ca.onclick = () => { edit = false; draw(); };
+    const rs = $("#f-reset"); if (rs) rs.onclick = async () => { await act(() => PUT("/api/floor/layout", { reset: true }), "Grąžintas automatinis išdėstymas"); edit = false; draw(); };
+    const sv = $("#f-save"); if (sv) sv.onclick = async () => {
+      await act(() => PUT("/api/floor/layout", { areas: model.areas.filter(a => a.id).map(a => ({ id: a.id, ...a.box })),
+        centres: model.areas.flatMap(a => a.centres.map(c => ({ id: c.id, ...c.box }))) }), "Išdėstymas išsaugotas");
+      edit = false; draw();
+    };
+    render();
+  };
+
+  // tempimas: SVG koordinatės iš pelės / piršto, žingsnis – 0,5 m
+  const wireEdit = () => {
+    const svg = $("#fsvg");
+    const pt = ev => { const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
+    const snap = v => Math.round(v * 2) / 2;
+    svg.onpointerdown = ev => {
+      const rz = ev.target.dataset.rz, cg = ev.target.closest(".fc"), ag = ev.target.closest(".farea");
+      if (!ag) return;
+      ev.preventDefault();
+      const a = model.areas.find(x => String(x.id) === ag.dataset.area);
+      const c = cg ? a.centres.find(x => String(x.id) === cg.dataset.c) : null;
+      const target = c ? c.box : a.box, start = pt(ev), b0 = { ...target };
+      // tempiant keičiamas tik tempiamas elementas: perpiešus visą SVG,
+      // naršyklė prarastų tempimą po pirmo judesio
+      const g = cg || ag, rect = g.querySelector(c ? ".fcr" : ".far"), handle = g.querySelector(`.rz[data-rz="${c ? "c" : "a"}"]`);
+      svg.setPointerCapture(ev.pointerId);
+      svg.onpointermove = m => {
+        const p = pt(m), dx = p.x - start.x, dy = p.y - start.y;
+        if (rz) { target.w = Math.max(c ? 3 : 6, snap(b0.w + dx)); target.h = Math.max(c ? 2.5 : 5, snap(b0.h + dy)); }
+        else { target.x = Math.max(0, snap(b0.x + dx)); target.y = Math.max(0, snap(b0.y + dy)); }
+        if (c) {                                         // centras – baro viduje
+          target.w = Math.min(target.w, a.box.w); target.h = Math.min(target.h, a.box.h - 2);
+          target.x = Math.min(target.x, a.box.w - target.w); target.y = Math.max(2.5, Math.min(target.y, a.box.h - target.h));
+        }
+        g.setAttribute("transform", `translate(${target.x},${target.y})`);
+        rect.setAttribute("width", target.w); rect.setAttribute("height", target.h);
+        if (handle) { const k = c ? 1 : 1.4; handle.setAttribute("x", target.w - k); handle.setAttribute("y", target.h - k); }
+      };
+      svg.onpointerup = () => {
+        svg.onpointermove = svg.onpointerup = null;
+        model.size.w = Math.max(...model.areas.map(x => x.box.x + x.box.w)); model.size.h = Math.max(...model.areas.map(x => x.box.y + x.box.h));
+        render();
+      };
+    };
+  };
+
+  await draw();
+  S.timers.push(setInterval(() => { if (!edit && $("#modal").hidden && location.hash.startsWith("#/cechas")) draw(); }, 10000));
+  S.timers.push(setInterval(() => $$("#fsvg [data-since]").forEach(el => el.dataset.since && (el.textContent = dur(+el.dataset.base + since(el.dataset.since)))), 1000));
+}
+
+function centreModal(c, a) {
+  const t = c.task;
+  modal(`<div class="row between"><h2><span class="mono">${esc(c.code)}</span> ${esc(c.name)}</h2>${pill(c.state, ST_LABEL[c.state])}</div>
+    <p class="muted">${esc(a.name)}${c.manual ? "" : " · staklės"}${c.needs_files ? " · reikia programos failo" : ""}</p>
+    ${c.alerts.map(x => `<div class="${x.severity === "red" ? "lock" : "warn"}">⚠ ${esc(x.text)}</div>`).join("")}
+    ${t ? `<div class="card"><b>${esc(t.project_code)} · ${esc(t.assembly_code)}</b> ${esc(t.name)}
+      <div class="muted">${t.qty_good}/${t.qty_plan} vnt.${t.norm_min ? ` · norma ${t.norm_min} min/vnt` : ""}${c.who ? ` · ${esc(c.who)}` : ""}</div>
+      <div class="timer-s mono">${dur((c.work_s || 0) + (c.state === "dirba" && c.since ? since(c.since) : 0))}</div>
+      ${c.pause ? `<div class="warn">⏸ ${esc(c.pause)}</div>` : ""}</div>`
+      : c.next ? `<p>Kitas eilėje: <b>${esc(c.next.project_code)} · ${esc(c.next.assembly_code)}</b> ${esc(c.next.name)}</p>${c.lock ? `<p class="lock">🔒 ${esc(c.lock)}</p>` : ""}` : `<p class="muted">Eilėje darbų nėra.</p>`}
+    <p>Eilėje: <b>${c.queue}</b>${c.waiting ? ` · atkeliavusių detalių laukia: <b>${c.waiting}</b>` : ""}</p>
+    <div class="row">${can("execute") ? `<a class="btn" href="#/t/${esc(c.code)}">Terminalas</a>` : ""}${can("plan") ? `<a class="btn ghost" href="#/planas/${esc(c.code)}">Centro eilė</a>` : ""}
+      <button class="ghost" id="cm-x">Uždaryti</button></div>`, () => { $("#cm-x").onclick = closeModal; });
 }
 
 // ---------- planas ----------

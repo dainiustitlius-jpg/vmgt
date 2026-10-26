@@ -16,7 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from .. import config as cfgmod
 from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
-                        importer, meetings, ncfiles, ncr, planner, projects, routing, seed, signals, tasks)
+                        importer, layout, meetings, ncfiles, ncr, planner, projects, routing, seed, signals,
+                        tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -409,6 +410,15 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     @app.get("/api/floor")
     def floor(user=Depends(need("view")), con=Depends(get_con)):
         return {"now": db.now(), "areas": projects.list_areas(con, active_only=True), "centres": analytics.floor(con)}
+
+    @app.get("/api/floor/plan")
+    def floor_plan(project_id: int | None = None, user=Depends(need("view")), con=Depends(get_con)):
+        return layout.plan(con, project_id)
+
+    @app.put("/api/floor/layout")
+    def floor_layout(body: dict, user=Depends(need("admin")), con=Depends(get_con)):
+        layout.save(con, user["id"], body)
+        return {"ok": True}
 
     @app.get("/api/analytics")
     def analytics_get(date_from: str | None = None, date_to: str | None = None,

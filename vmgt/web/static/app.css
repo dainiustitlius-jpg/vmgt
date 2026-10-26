@@ -399,3 +399,56 @@ table.tedit input:disabled, table.tedit select:disabled { background: transparen
 .nt .hdot { margin-top: 6px; }
 .ntbody { white-space: pre-line; font-size: 13px; color: var(--muted); }
 @media (max-width: 640px) { .ghead, .grow { grid-template-columns: 120px 1fr; } .chrow { grid-template-columns: 1fr; gap: 0; } }
+
+/* cecho planas (SVG, vienetai – sąlyginiai metrai): spalva – tik centro būsena */
+.fwrap { padding: 10px; }
+.fwrap:fullscreen { background: var(--bg); padding: 20px; overflow: auto; display: grid; align-content: center; }
+.fsvg { width: 100%; height: auto; display: block; font-family: var(--f-body); }
+.far { fill: color-mix(in srgb, var(--paper) 70%, transparent); stroke: var(--tick); stroke-width: .15; stroke-dasharray: .8 .4; }
+.fname { font-size: 1.5px; font-weight: 600; fill: var(--fg); }
+.fcount { font-size: 1.1px; fill: var(--muted); text-anchor: end; }
+.fc { cursor: pointer; }
+.fc .fcr { fill: var(--paper); stroke: var(--wait); stroke-width: .18; }
+.fc .led { fill: var(--wait); }
+.fc.st-dirba .fcr { stroke: var(--ok); fill: color-mix(in srgb, var(--ok) 10%, var(--paper)); stroke-width: .3; }
+.fc.st-dirba .led { fill: var(--ok); animation: led 1.6s ease-in-out infinite; }
+.fc.st-pristabdyta .fcr { stroke: var(--pause); fill: color-mix(in srgb, var(--pause) 12%, var(--paper)); stroke-width: .3; }
+.fc.st-pristabdyta .led { fill: var(--pause); }
+.fc.st-gali .fcr { stroke: var(--ready); } .fc.st-gali .led { fill: var(--ready); }
+.fc.st-laukia .fcr { stroke: var(--bad); stroke-dasharray: .5 .3; } .fc.st-laukia .led { fill: var(--bad); }
+.fc.st-tuscia .fcr { stroke: var(--line); } .fc.st-tuscia .led { fill: var(--line); }
+.fc:hover .fcr, .fc:focus .fcr { stroke: var(--accent); stroke-width: .35; }
+.fc:focus { outline: none; }
+.fc.dim { opacity: .22; }
+.fc.inproj .fcr { stroke: var(--signal); stroke-width: .4; }
+.fcode { font-size: 1.15px; font-weight: 700; font-family: var(--f-mono); fill: var(--fg); }
+.fsub { font-size: .85px; fill: var(--muted); }
+.ftime { font-size: 1.05px; font-family: var(--f-mono); font-weight: 600; fill: var(--fg); }
+.fproj { font-size: .9px; font-weight: 600; fill: var(--signal); }
+.fwait rect { fill: var(--accent); } .fwait text { font-size: .9px; fill: #fff; text-anchor: middle; font-weight: 600; }
+.falert circle { fill: var(--pause); } .falert.red circle { fill: var(--bad); }
+.falert text { font-size: 1.3px; font-weight: 700; fill: #fff; text-anchor: middle; }
+.falert { animation: blink 1.2s steps(2, start) infinite; }
+.fmove { fill: none; stroke: var(--accent); stroke-width: .25; opacity: .75; }  /* ne .flow – tai terminalo srauto eilutė */
+.arF { fill: var(--accent); }
+.proj { fill: none; stroke: var(--signal); stroke-width: .2; stroke-dasharray: .8 .5; opacity: .8; }
+.proj.done { stroke-dasharray: none; }
+.arP { fill: var(--signal); }
+.flabel { font-size: .95px; font-weight: 700; fill: var(--accent); paint-order: stroke; stroke: var(--paper); stroke-width: .35; text-anchor: middle; }
+.editing .farea { cursor: move; } .editing .fc { cursor: move; }
+.rz { fill: var(--signal); cursor: nwse-resize; }
+.flegend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; align-items: center; }
+.flegend .lg { display: inline-block; width: 12px; height: 10px; border: 2px solid var(--wait); margin-right: 5px; vertical-align: -1px; }
+.flegend .lg.st-dirba { border-color: var(--ok); } .flegend .lg.st-pristabdyta { border-color: var(--pause); }
+.flegend .lg.st-gali { border-color: var(--ready); } .flegend .lg.st-laukia { border-color: var(--bad); border-style: dashed; }
+.flegend .lg.st-tuscia { border-color: var(--line); }
+.lgal { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--bad); color: #fff; font-weight: 700; font-size: 10px; }
+.lgp { color: var(--signal); }
+.ftools { gap: 8px; }
+.ftools > .row { min-width: 0; max-width: 100%; }
+.ftools select { width: 20em; max-width: 100%; min-width: 0; }  /* ilgas projekto pavadinimas neišplečia puslapio */
+@media (max-width: 760px) { .fwrap { overflow-x: auto; } .fsvg { min-width: 720px; } }  /* telefone – slenkama kortelėje, ne puslapis */
+.timer-s { font-size: 28px; font-weight: 600; }
+@keyframes led { 50% { opacity: .35; } }
+@keyframes blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .fc.st-dirba .led, .falert { animation: none; } }

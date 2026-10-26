@@ -423,6 +423,12 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX ix_notifications_user ON notifications (user_id, read_at);
     """,
+    # 11 – cecho planas: barų ir centrų vieta plane (JSON {x, y, w, h}; centro –
+    # baro viduje, kad perkeliant barą centrai keliautų kartu). NULL – automatinė
+    """
+    ALTER TABLE areas ADD COLUMN layout TEXT;
+    ALTER TABLE work_centres ADD COLUMN layout TEXT;
+    """,
 ]
 
 

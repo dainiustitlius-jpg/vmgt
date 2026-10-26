@@ -392,6 +392,37 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX ix_task_files ON task_files (task_id, current);
     """,
+    # 10 – planavimo signalai: pokyčių žurnalas ir asmeniniai pranešimai
+    """
+    CREATE TABLE plan_changes (
+        id INTEGER PRIMARY KEY,
+        at TEXT NOT NULL,
+        user_id INTEGER REFERENCES users(id),
+        kind TEXT NOT NULL,                    -- phase / priority / queue / activate / shop_delay / component_delay
+        project_id INTEGER REFERENCES projects(id),
+        summary TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        impact TEXT NOT NULL DEFAULT '{}',     -- JSON: paveikti projektai ir priežastys
+        key TEXT UNIQUE                        -- tas pats signalas (pvz. tos pačios pauzės) – tik kartą
+    );
+    CREATE INDEX ix_plan_changes_at ON plan_changes (at);
+    CREATE TABLE notifications (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        project_id INTEGER REFERENCES projects(id),
+        change_id INTEGER REFERENCES plan_changes(id),
+        kind TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'info', -- red / yellow / info / good
+        title TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT '',
+        link TEXT NOT NULL DEFAULT '',
+        key TEXT NOT NULL,                     -- tas pats signalas tam pačiam žmogui – vieną kartą
+        created TEXT NOT NULL,
+        read_at TEXT,
+        UNIQUE (user_id, key)
+    );
+    CREATE INDEX ix_notifications_user ON notifications (user_id, read_at);
+    """,
 ]
 
 

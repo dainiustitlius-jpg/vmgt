@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import config as cfgmod
 from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
-                        importer, meetings, ncfiles, ncr, projects, routing, seed, tasks)
+                        importer, meetings, ncfiles, ncr, planner, projects, routing, seed, signals, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -144,7 +144,17 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.put("/api/projects/{pid}")
     def project_put(pid: int, body: dict, user=Depends(need("projects")), con=Depends(get_con)):
-        projects.save_project(con, user["id"], body, pid)
+        # prioritetas ir patvirtinimas iš krepšelio – per planuotoją: poveikis kitiems projektams ir pranešimai
+        body = dict(body)
+        cur = projects.get_project(con, pid)
+        if body.get("status") == "vykdomas" and cur["status"] == "krepselis":
+            planner.apply(con, user, {"kind": "activate", "project_id": pid})
+            body.pop("status")
+        if "priority" in body and int(body["priority"] or 0) != cur["priority"]:
+            planner.apply(con, user, {"kind": "priority", "project_id": pid, "priority": int(body.pop("priority"))})
+        body.pop("priority", None)
+        if body:
+            projects.save_project(con, user["id"], body, pid)
         return {"ok": True}
 
     @app.post("/api/projects/{pid}/assemblies")
@@ -162,7 +172,16 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.put("/api/phases/{phid}")
     def phase_put(phid: int, body: dict, user=Depends(need("projects")), con=Depends(get_con)):
-        projects.save_phase(con, user["id"], None, body, phid)
+        body = dict(body)
+        ph = db.row(con.execute("SELECT plan_start, plan_end FROM phases WHERE id=?", (phid,)))
+        if ph and ("plan_start" in body or "plan_end" in body):
+            a, b = body.pop("plan_start", ph["plan_start"]), body.pop("plan_end", ph["plan_end"])
+            if a and b and (a, b) != (ph["plan_start"], ph["plan_end"]):
+                planner.apply(con, user, {"kind": "phase", "phase_id": phid, "plan_start": a, "plan_end": b})
+            elif (a, b) != (ph["plan_start"], ph["plan_end"]):
+                body.update({"plan_start": a, "plan_end": b})      # dar be vienos datos – poveikio nėra ką skaičiuoti
+        if body:
+            projects.save_phase(con, user["id"], None, body, phid)
         return {"ok": True}
 
     @app.post("/api/phases/{phid}/status")
@@ -188,8 +207,8 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.post("/api/tasks/{tid}/move")
     def task_move(tid: int, body: dict, user=Depends(need("plan")), con=Depends(get_con)):
-        tasks.move(con, user["id"], tid, body.get("where", ""))
-        return {"ok": True}
+        imp = planner.apply(con, user, {"kind": "queue", "task_id": tid, "where": body.get("where", "")})
+        return {"ok": True, "affected": imp["affected"]}
 
     @app.post("/api/tasks/{tid}/ack_revision")
     def task_ack(tid: int, user=Depends(need("ack_rev")), con=Depends(get_con)):
@@ -224,6 +243,46 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     def area_put(aid: int, body: dict, user=Depends(need("admin")), con=Depends(get_con)):
         projects.save_area(con, user["id"], body, aid)
         return {"ok": True}
+
+    # ---------- planuotojo Gantt, poveikis, signalai ----------
+
+    @app.get("/api/planner")
+    def planner_board(weeks: int = 12, basket: int = 1, user=Depends(need("view")), con=Depends(get_con)):
+        return planner.board(con, max(4, min(weeks, 40)), bool(basket))
+
+    def need_planning(user=Depends(get_user)):
+        # planuotojas datų keisti per projekto kortelę negali (`projects`), bet plane – taip
+        if not auth.perms_of(user) & {"plan", "projects"}:
+            raise HTTPException(403, "Neturite teisės šiam veiksmui")
+        return user
+
+    @app.post("/api/planner/impact")
+    def planner_impact(body: dict, user=Depends(need_planning), con=Depends(get_con)):
+        return planner.impact(con, user, body)
+
+    @app.post("/api/planner/apply")
+    def planner_apply(body: dict, user=Depends(need_planning), con=Depends(get_con)):
+        note = body.pop("note", "")
+        return planner.apply(con, user, body, note)
+
+    @app.get("/api/planner/changes")
+    def planner_changes(project_id: int | None = None, limit: int = 40, user=Depends(need("view")),
+                        con=Depends(get_con)):
+        return signals.changes(con, min(limit, 200), project_id)
+
+    @app.get("/api/notifications")
+    def notif_list(unread: int = 0, user=Depends(get_user), con=Depends(get_con)):
+        signals.scan(con)                    # pažadėtos datos praėjo – signalas be fono gijų
+        return {"unread": signals.unread(con, user["id"]), "items": signals.list_for(con, user["id"], bool(unread))}
+
+    @app.get("/api/notifications/count")
+    def notif_count(user=Depends(get_user), con=Depends(get_con)):
+        signals.scan(con)
+        return {"unread": signals.unread(con, user["id"])}
+
+    @app.post("/api/notifications/read")
+    def notif_read(body: dict, user=Depends(get_user), con=Depends(get_con)):
+        return {"read": signals.mark_read(con, user["id"], body.get("ids"))}
 
     @app.get("/api/plan/{code}")
     def plan_get(code: str, user=Depends(need("plan")), con=Depends(get_con)):

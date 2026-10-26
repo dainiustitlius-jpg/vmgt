@@ -135,6 +135,7 @@ function renderNav() {
     return `<a href="${href}" class="${on ? "on" : ""}">${label}</a>`;
   }).join("");
   $("#who").textContent = `${S.me.name} · ${S.me.role_label}`;
+  bellCount();
 }
 $("#logout").onclick = async () => { await POST("/api/logout").catch(() => {}); S.me = null; location.hash = "#/login"; route(); };
 
@@ -755,15 +756,19 @@ async function pageFloor() {
 }
 
 // ---------- planas ----------
+const planTabs = on => `<nav class="tabs"><a href="#/planas" class="${on === "g" ? "on" : ""}">Departamentų planas</a><a href="#/planas/eiles" class="${on === "q" ? "on" : ""}">Centrų eilės</a></nav>`;
+
 async function pagePlan(code) {
+  if (!code) return pagePlanner();
   const centres = await GET("/api/centres");
+  if (code === "eiles") code = null;
   code = code || localStorage.getItem("pf.plan") || (centres[0] && centres[0].code);
   if (!code) { app().innerHTML = `<p class="pad">Darbo centrų nėra.</p>`; return; }
   localStorage.setItem("pf.plan", code);
   const r = await GET(`/api/plan/${code}`);
   const unapproved = r.tasks.filter(t => !t.approved).length;
-  app().innerHTML = `<div class="row between"><h1>Darbo centrų eilės</h1>
-    <select id="pc">${centreOptions(centres, code)}</select></div>
+  app().innerHTML = `<div class="row between"><h1>Planavimas</h1>
+    <select id="pc">${centreOptions(centres, code)}</select></div>${planTabs("q")}
   <div class="card"><div class="row between"><h2>${esc(r.centre.code)} ${esc(r.centre.name)}</h2>
     <button id="appr" ${unapproved ? "" : "disabled"}>Patvirtinti eilę${unapproved ? ` (${unapproved} naujos)` : ""}</button></div>
     <p class="muted">Terminalas rodo tik patvirtintas užduotis. ${r.centre.strict_order ? "Šiame centre griežta eilė: pradėti galima tik pirmą." : "Operatorius gali rinktis iš eilės."}</p>
@@ -779,7 +784,173 @@ async function pagePlan(code) {
       || `<tr><td colspan="8" class="muted">Eilėje užduočių nėra.</td></tr>`}</tbody></table></div></div>`;
   $("#pc").onchange = e => (location.hash = `#/planas/${e.target.value}`);
   $("#appr").onclick = async () => { await act(() => POST(`/api/plan/${code}/approve`), "Eilė patvirtinta"); pagePlan(code); };
-  $$("[data-mv]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/tasks/${b.dataset.id}/move`, { where: b.dataset.mv })); pagePlan(code); });
+  $$("[data-mv]").forEach(b => b.onclick = async () => {
+    const r = await act(() => POST(`/api/tasks/${b.dataset.id}/move`, { where: b.dataset.mv }));
+    // perkėlimas eilėje signalizuoja projektams, kurių darbai pasislinko
+    if (r.affected && r.affected.length) toast(`Pranešta: ${r.affected.map(a => a.code).join(", ")} – jų darbai eilėje pasislinko`);
+    pagePlan(code);
+  });
+}
+
+// ---------- pranešimai (varpelis) ----------
+const SEV_LABEL = { red: "Kritiška", yellow: "Dėmesio", info: "Informacija", good: "Pagerėjo" };
+const KIND_LABEL = { phase: "Etapo datos", priority: "Prioritetas", queue: "Centro eilė", activate: "Naujas projektas",
+  shop_delay: "Vėlavimas ceche", component_delay: "Komponentai" };
+async function bellCount() {
+  if (!S.me) return;
+  try {
+    const r = await GET("/api/notifications/count");
+    const n = $("#bell-n"); n.hidden = !r.unread; n.textContent = r.unread > 99 ? "99+" : r.unread;
+  } catch {}
+}
+// kas minutę – ne per S.timers, nes juos išvalo kiekvienas puslapio keitimas
+setInterval(() => { if (S.me && !document.hidden) bellCount(); }, 60000);
+$("#bell").onclick = async () => {
+  const r = await GET("/api/notifications");
+  bellCount();
+  modal(`<div class="row between"><h2>Pranešimai</h2>${r.unread ? `<button class="ghost small" id="nt-all">Pažymėti visus perskaitytais</button>` : ""}</div>
+    <p class="muted small">Plano pokyčiai, paveikę jūsų projektus: kitų projektų perkėlimai, vėlavimai ceche, komponentai, nauji projektai.</p>
+    <div class="ntlist">${r.items.map(n => `<a class="nt ${n.read_at ? "" : "unread"}" href="${esc(n.link || "#/planas")}" data-nt="${n.id}">
+      <i class="hdot ${LEVEL_CLS[n.severity === "red" ? "red" : n.severity === "yellow" ? "yellow" : "green"]}" title="${esc(SEV_LABEL[n.severity] || "")}"></i>
+      <div><b>${esc(n.title)}</b><div class="muted small">${esc(KIND_LABEL[n.kind] || n.kind)} · ${dt(n.created)}</div>
+      <div class="ntbody">${esc(n.body)}</div></div></a>`).join("") || `<p class="muted">Pranešimų nėra.</p>`}</div>
+    <div><button class="ghost" id="nt-x">Uždaryti</button></div>`, box => {
+    $("#nt-x").onclick = closeModal;
+    const all = $("#nt-all"); if (all) all.onclick = async () => { await POST("/api/notifications/read", {}); closeModal(); bellCount(); };
+    $$("[data-nt]", box).forEach(a => a.onclick = () => { POST("/api/notifications/read", { ids: [+a.dataset.nt] }).then(bellCount); closeModal(); });
+  });
+};
+
+// ---------- planuotojo Gantt: visų departamentų darbai laike ----------
+// Juostą galima tempti (perkelti) arba tempti dešinį kraštą (keisti pabaigą);
+// prieš įrašant serveris parodo poveikį kitiems projektams.
+const DAY = 864e5;
+const isoAdd = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * DAY).toISOString().slice(0, 10);
+const dayDiff = (a, b) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / DAY);
+
+async function pagePlanner() {
+  let weeks = 12, basket = true, focus = "";
+  try { weeks = +(localStorage.getItem("pf.gw") || 12); basket = localStorage.getItem("pf.gb") !== "0"; } catch {}
+  let dragging = false;
+  const draw = async () => {
+    const [r, ch] = await Promise.all([GET(`/api/planner?weeks=${weeks}&basket=${basket ? 1 : 0}`), GET("/api/planner/changes?limit=25")]);
+    const total = weeks * 7, x = d => Math.max(0, Math.min(100, dayDiff(r.start, d) / total * 100));
+    const color = Object.fromEntries(r.projects.map((p, i) => [p.id, PROJ_COLORS[i % PROJ_COLORS.length]]));
+    const pcode = Object.fromEntries(r.projects.map(p => [p.id, p]));
+    const lanes = bars => {           // persidengiančios juostos – į atskiras eilutes
+      const out = [];
+      [...bars].sort((a, b) => a.plan_start.localeCompare(b.plan_start)).forEach(b => {
+        const l = out.find(l => l[l.length - 1].plan_end < b.plan_start); (l || (out[out.length] = [])).push(b);
+      });
+      return out;
+    };
+    const bar = b => {
+      const p = pcode[b.project_id], s = Math.max(0, dayDiff(r.start, b.plan_start)), e = dayDiff(r.start, b.plan_end) + 1;
+      if (e <= 0 || s >= total) return "";
+      const dim = focus && +focus !== b.project_id ? "dim" : "";
+      const tip = `${p.code} ${p.name}\n${b.assembly ? "Mazgas " + b.assembly + " · " : ""}${b.label} · ${b.plan_start} – ${b.plan_end}\n${b.status}${b.owner ? " · " + b.owner : ""}${b.share ? ` · ${b.share} val.` : ""}${b.late ? "\nVĖLUOJA" : ""}`;
+      return `<div class="gb ${p.status === "krepselis" ? "basket" : ""} ${b.status === "baigta" ? "done" : ""} ${b.late || b.late_start ? "late" : ""} ${dim}"
+        style="left:${x(b.plan_start)}%;width:${Math.max(0.6, (Math.min(e, total) - s) / total * 100)}%;--pc:${color[b.project_id]}"
+        data-ph="${b.phase_id}" data-s="${b.plan_start}" data-e="${b.plan_end}" title="${esc(tip)}" tabindex="0">
+        <span>${esc(p.code)}${b.assembly ? " " + esc(b.assembly) : ""} · ${esc(b.label)}</span>${b.status !== "baigta" ? '<i class="gh" title="Tempkite – keisti pabaigą"></i>' : ""}</div>`;
+    };
+    const today = x(r.today);
+    app().innerHTML = `<div class="row between"><h1>Planavimas</h1>
+      <div class="row"><label class="row" style="display:flex"><input type="checkbox" id="g-b" ${basket ? "checked" : ""}> krepšelio projektai</label>
+        <select id="g-w" aria-label="Laikotarpis">${[8, 12, 16, 24].map(n => `<option value="${n}" ${n === weeks ? "selected" : ""}>${n} sav.</option>`).join("")}</select></div></div>
+    ${planTabs("g")}
+    <div class="card"><div class="row between"><h2>Projektai</h2><span class="muted small">Spustelėkite projektą – paryškinsite jo darbus. Prioritetą keiskite čia – parodomas poveikis kitiems.</span></div>
+      <div class="plegend">${r.projects.map(p => `<div class="pl ${focus && +focus === p.id ? "on" : ""}" style="--pc:${color[p.id]}">
+        <button class="ghost small" data-focus="${p.id}"><i></i><b class="mono">${esc(p.code)}</b> ${esc(p.name)}</button>
+        ${can("plan") || can("projects") ? `<select data-prio="${p.id}" aria-label="Prioritetas ${esc(p.code)}">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${n === p.priority ? "selected" : ""}>P${n}</option>`).join("")}</select>` : `<span class="muted">P${p.priority}</span>`}
+        ${p.status === "krepselis" ? (can("projects") ? `<button class="small" data-act-p="${p.id}">Patvirtinti…</button>` : pill("krepselis", "krepšelis")) : ""}
+        <span class="muted small nw">${p.due_date ? "iki " + esc(p.due_date) : ""}</span></div>`).join("")}</div></div>
+    <div class="card gantt2"><div class="gwrap"><div class="gtable">
+      <div class="ghead"><div class="glab"></div><div class="gtime">${r.weeks.map((w, i) => `<span style="left:${i / weeks * 100}%;width:${100 / weeks}%">${esc(w.label)}<small>${esc(w.start.slice(5))}</small></span>`).join("")}
+        <i class="gtoday" style="left:${today}%"></i></div></div>
+      ${r.departments.filter(d => d.bars.length || d.load.some(c => c.hours)).map(d => `<div class="grow">
+        <div class="glab"><b>${esc(d.name)}</b><span class="muted small">${d.capacity_week} val./sav.</span></div>
+        <div class="gtime">
+          <div class="gload">${d.load.map((c, i) => `<span class="${utilCls(c.util)}" style="left:${i / weeks * 100}%;width:${100 / weeks}%" title="${esc(r.weeks[i].label)}: ${c.hours} val. iš ${d.capacity_week}${c.shortage ? ` – trūksta ${c.shortage} val.` : ""}">${c.util ? Math.round(c.util * 100) + "%" : ""}</span>`).join("")}</div>
+          ${lanes(d.bars).map(l => `<div class="glane">${l.map(bar).join("")}</div>`).join("")}
+          <i class="gtoday" style="left:${today}%"></i></div></div>`).join("")}
+    </div></div>
+    <p class="muted small">Juostos – etapų planas departamentuose (gamybos baruose – pagal operacijas). Viršuje – savaitės apkrova. Raudonas kraštas – vėluoja, brūkšniuota – krepšelio projektas. Tempkite juostą arba jos dešinį kraštą; spustelėję – keisti datas.</p></div>
+    <div class="card"><h2>Pokyčių signalai</h2>${changesList(ch)}</div>`;
+    $("#g-b").onchange = e => { basket = e.target.checked; try { localStorage.setItem("pf.gb", basket ? "1" : "0"); } catch {} draw(); };
+    $("#g-w").onchange = e => { weeks = +e.target.value; try { localStorage.setItem("pf.gw", weeks); } catch {} draw(); };
+    $$("[data-focus]").forEach(b => b.onclick = () => { focus = focus === b.dataset.focus ? "" : b.dataset.focus; draw(); });
+    $$("[data-prio]").forEach(sel => sel.onchange = () => impactModal({ kind: "priority", project_id: +sel.dataset.prio, priority: +sel.value }, draw, draw));
+    $$("[data-act-p]").forEach(b => b.onclick = () => impactModal({ kind: "activate", project_id: +b.dataset.actP }, draw));
+    $$(".gb[data-ph]").forEach(el => wireBar(el, r, total, () => (dragging = true), draw));
+  };
+  await draw();
+  S.timers.push(setInterval(() => { if ($("#modal").hidden && !dragging && location.hash === "#/planas") draw(); }, 60000));
+}
+
+function wireBar(el, r, total, onDrag, redraw) {
+  const s0 = el.dataset.s, e0 = el.dataset.e, id = +el.dataset.ph;
+  const open = (s, e) => impactModal({ kind: "phase", phase_id: id, plan_start: s, plan_end: e }, redraw, redraw);
+  const edit = () => modal(`<h2>Etapo datos</h2><p>${esc(el.title.split("\n").slice(0, 2).join(" · "))}</p>
+    <div class="row"><label>Pradžia<input type="date" id="bp-s" value="${s0}"></label><label>Pabaiga<input type="date" id="bp-e" value="${e0}"></label></div>
+    <div class="row"><button id="bp-ok">Peržiūrėti poveikį</button><button class="ghost" id="bp-x">Atšaukti</button></div>`, () => {
+    $("#bp-x").onclick = closeModal;
+    $("#bp-ok").onclick = () => open($("#bp-s").value, $("#bp-e").value);
+  });
+  el.onkeydown = e => { if (e.key === "Enter") edit(); };
+  if (!(can("plan") || can("projects")) || el.classList.contains("done")) { el.onclick = edit; return; }
+  el.onpointerdown = ev => {
+    ev.preventDefault();
+    const resize = ev.target.classList.contains("gh");
+    const pxPerDay = el.parentElement.getBoundingClientRect().width / total;
+    const startX = ev.clientX, left0 = parseFloat(el.style.left), w0 = parseFloat(el.style.width);
+    let days = 0;
+    el.setPointerCapture(ev.pointerId); el.classList.add("drag"); onDrag();
+    el.onpointermove = m => {
+      days = Math.round((m.clientX - startX) / pxPerDay);
+      if (resize) el.style.width = Math.max(100 / total, w0 + days * 100 / total) + "%";
+      else el.style.left = left0 + days * 100 / total + "%";
+      el.querySelector("span").textContent = resize ? `pabaiga ${isoAdd(e0, days)}` : `${isoAdd(s0, days)} – ${isoAdd(e0, days)}`;
+    };
+    el.onpointerup = () => {
+      el.onpointermove = el.onpointerup = null; el.classList.remove("drag");
+      if (!days) return edit();                                   // paspaudimas, ne tempimas
+      const s = resize ? s0 : isoAdd(s0, days), e = isoAdd(e0, days);
+      if (resize && e < s0) return redraw();
+      open(s, e);
+    };
+  };
+}
+
+function changesList(list) {
+  return list.length ? `<div class="chg">${list.map(c => `<div class="chrow">
+    <div class="muted small nw">${dt(c.at)}</div>
+    <div><b>${esc(KIND_LABEL[c.kind] || c.kind)}</b> · ${esc(c.summary)}${c.user_name ? ` <span class="muted">– ${esc(c.user_name)}</span>` : ""}
+      ${c.note ? `<div class="muted small">„${esc(c.note)}“</div>` : ""}
+      ${(c.impact.affected || []).length ? `<div class="row" style="gap:4px;margin-top:3px">${c.impact.affected.map(a => `<span class="sev ${a.severity}" title="${esc(a.reasons.join("\n"))}">${esc(a.code || "")}</span>`).join("")}</div>` : `<div class="muted small">kitų projektų nepaveikė</div>`}</div></div>`).join("")}</div>`
+    : `<p class="muted">Pokyčių dar nebuvo.</p>`;
+}
+
+// Poveikio peržiūra: ką pakeitimas padarys kitiems projektams – prieš įrašant
+async function impactModal(change, after, onCancel) {
+  let imp;
+  try { imp = await POST("/api/planner/impact", change); } catch (e) { toast(e.message, true); onCancel && onCancel(); return; }
+  const n = imp.affected.length;
+  modal(`<h2>Pakeitimo poveikis</h2><p><b>${esc(imp.summary)}</b></p>
+    ${imp.own.length ? `<div class="card warnbox">${imp.own.map(w => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}</div>` : ""}
+    ${n ? `<div><b>Paveikti projektai (${n})</b> <span class="muted small">– jų vadovams ir atsakingiesiems bus išsiųstas pranešimas</span>
+      <div class="aff">${imp.affected.map(a => `<div class="affrow ${a.severity}"><div><span class="sev ${a.severity}">${esc(SEV_LABEL[a.severity])}</span> <b class="mono">${esc(a.code)}</b> ${esc(a.name)}</div>
+        <ul>${a.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div></div>`
+      : `<p class="s-baigta">✓ Kitų projektų departamentai nepersikrauna, eilės nepasislenka.</p>`}
+    ${imp.freed.length ? `<div><b>Atsilaisvina</b><ul class="muted small">${imp.freed.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
+    <label>Pastaba (kodėl keičiama – matys paveiktieji)<input id="im-note" placeholder="pvz. užsakovas paprašė anksčiau"></label>
+    <div class="row"><button id="im-ok">${n ? `Įrašyti ir pranešti (${n})` : "Įrašyti"}</button><button class="ghost" id="im-x">Atšaukti</button></div>`, () => {
+    $("#im-x").onclick = () => { closeModal(); onCancel && onCancel(); };
+    $("#im-ok").onclick = async () => {
+      await act(() => POST("/api/planner/apply", { ...change, note: $("#im-note").value }), n ? `Įrašyta, pranešta ${n} projektams` : "Įrašyta");
+      closeModal(); after && after();
+    };
+  });
 }
 
 // ---------- terminalas ----------

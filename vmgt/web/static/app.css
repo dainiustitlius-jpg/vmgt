@@ -347,3 +347,55 @@ table.tedit input:disabled, table.tedit select:disabled { background: transparen
 .fcell.over { outline: 2px dashed var(--accent); outline-offset: -3px; }
 .frow { display: flex; gap: 4px; align-items: center; margin-bottom: 3px; }
 .upl { font-size: 13px; padding: 2px 8px; cursor: pointer; }
+
+/* planuotojo Gantt: eilutės – departamentai, juostos – projektų etapai (spalva – projektas) */
+.gwrap { overflow-x: auto; }
+.gtable { min-width: 980px; display: grid; }
+.ghead, .grow { display: grid; grid-template-columns: 190px 1fr; border-top: 1px solid var(--line-soft); }
+.ghead { border-top: 0; border-bottom: 2px solid var(--line); }
+.glab { padding: 6px 8px 6px 0; display: grid; align-content: start; gap: 2px; font-size: 13px; }
+.gtime { position: relative; min-height: 28px; padding-bottom: 4px; }
+.ghead .gtime { height: 34px; }
+.ghead .gtime span { position: absolute; top: 2px; font-size: 11px; font-weight: 600; color: var(--muted); border-left: 1px solid var(--line); padding-left: 4px; height: 30px; }
+.ghead .gtime small { display: block; font-weight: 400; font-family: var(--f-mono); font-size: 10px; }
+.gtoday { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); opacity: .55; pointer-events: none; z-index: 2; }
+.gload { position: relative; height: 16px; margin: 4px 0; }
+.gload span { position: absolute; top: 0; bottom: 0; font-size: 10px; text-align: center; line-height: 16px; color: var(--u-fg);
+  border-left: 1px solid var(--paper); font-family: var(--f-mono); }
+.glane { position: relative; height: 26px; margin-top: 3px; }
+.gb { position: absolute; top: 0; height: 24px; border-radius: 2px; background: color-mix(in srgb, var(--pc) 22%, var(--paper));
+  border: 1px solid var(--pc); border-left: 4px solid var(--pc); font-size: 11.5px; line-height: 22px; padding: 0 10px 0 5px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: grab; user-select: none; touch-action: none; color: var(--fg); }
+.gb span { pointer-events: none; }
+.gb.basket { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pc) 16%, var(--paper)) 0 6px, var(--paper) 6px 11px); border-style: dashed; }
+.gb.done { opacity: .5; cursor: pointer; }
+.gb.late { box-shadow: 0 0 0 2px var(--bad); }
+.gb.dim { opacity: .18; }
+.gb.drag { cursor: grabbing; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,.25); opacity: .95; }
+.gb:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.gb .gh { position: absolute; right: 0; top: 0; bottom: 0; width: 8px; cursor: ew-resize; background: color-mix(in srgb, var(--pc) 45%, transparent); }
+.plegend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.pl { display: flex; gap: 6px; align-items: center; }
+.pl button i { display: inline-block; width: 10px; height: 10px; background: var(--pc); margin-right: 6px; vertical-align: 0; }
+.pl.on button { box-shadow: inset 0 -2px 0 var(--pc); }
+.pl select { padding: 2px 4px; font-size: 12px; }
+/* poveikis ir signalai */
+.sev { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 2px; color: #fff; background: var(--wait); }
+.sev.red { background: var(--bad); } .sev.yellow { background: var(--pause); } .sev.good { background: var(--ok); }
+.aff { display: grid; gap: 6px; margin-top: 6px; max-height: 42vh; overflow: auto; }
+.affrow { border: 1px solid var(--line); border-left: 4px solid var(--wait); padding: 6px 8px; border-radius: 2px; font-size: 13px; }
+.affrow.red { border-left-color: var(--bad); } .affrow.yellow { border-left-color: var(--pause); }
+.affrow ul { margin: 4px 0 0; padding-left: 18px; }
+.warnbox { border-left: 4px solid var(--pause); }
+.chg { display: grid; }
+.chrow { display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line-soft); font-size: 13.5px; }
+.chrow:first-child { border-top: 0; }
+.bell { position: relative; padding: 4px 9px; font-size: 15px; }
+.bell .cnt { position: absolute; top: -5px; right: -6px; }
+.ntlist { display: grid; gap: 2px; max-height: 60vh; overflow: auto; }
+.nt { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 8px; text-decoration: none; color: var(--fg); border-radius: 2px; }
+.nt:hover { background: var(--line-soft); }
+.nt.unread { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.nt .hdot { margin-top: 6px; }
+.ntbody { white-space: pre-line; font-size: 13px; color: var(--muted); }
+@media (max-width: 640px) { .ghead, .grow { grid-template-columns: 120px 1fr; } .chrow { grid-template-columns: 1fr; gap: 0; } }

@@ -131,11 +131,16 @@ def save(con, user_id, data: dict, cid=None, source="rankinis") -> int:
         cid = cur.lastrowid
         db.log_event(con, user_id, "component", cid, "create", vals)
     else:
-        c = get(con, cid)
+        old = get(con, cid)
         if vals:
             con.execute(f"UPDATE components SET {', '.join(k + '=?' for k in vals)}, updated=? WHERE id=?",
                         (*vals.values(), now, cid))
             db.log_event(con, user_id, "component", cid, "update", vals)
+        c = get(con, cid)
+        # tiekėjas nukėlė datą – signalas (paliečia surinkimą?); importas eina tuo pačiu keliu
+        if old["promised_date"] and c["promised_date"] and c["promised_date"] > old["promised_date"]:
+            from .signals import component_delay
+            component_delay(con, user_id, c, old["promised_date"])
     c = get(con, cid)
     _sync_phase(con, user_id, c["project_id"], c["assembly_id"])
     return cid

@@ -226,10 +226,14 @@ def set_phase_status(con, by, phase_id, status) -> None:
         con.execute("UPDATE phases SET status=?, actual_start=NULL, actual_end=NULL WHERE id=?",
                     (status, phase_id))
     # pirmas pradėtas etapas projektą iš krepšelio perkelia į vykdomus
+    activated = 0
     if status != "planuota":
-        con.execute("UPDATE projects SET status='vykdomas' WHERE id=? AND status='krepselis'",
-                    (ph["project_id"],))
+        activated = con.execute("UPDATE projects SET status='vykdomas' WHERE id=? AND status='krepselis'",
+                                (ph["project_id"],)).rowcount
     db.log_event(con, by, "phase", phase_id, "status", {"status": status})
+    if activated:
+        from .signals import project_activated
+        project_activated(con, by, ph["project_id"])
 
 
 # ---------- gamybos barai ----------

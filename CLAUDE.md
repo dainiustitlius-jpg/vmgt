@@ -80,6 +80,8 @@ pagrindiniai pavyzdžiai. Testai (`sample_client`) – be demo; `test_demo.py` �
 | `services/meetings.py` | Susitikimų protokolai (MoM): veiksmai → užduotys, patvirtinimas |
 | `services/health.py` | Projekto sveikata realiu laiku: 4 sritys, lygiai, priežastys |
 | `services/capacity.py` | Resursų apkrova: departamentų poreikis prieš pajėgumą savaitėmis, trūkumai, krepšelio projektų tilpimas |
+| `services/planner.py` | Planuotojo Gantt pagal departamentus, pakeitimų poveikis (SAVEPOINT + apkrovos palyginimas), įrašymas |
+| `services/signals.py` | Pokyčių signalai ir pranešimai: planuotojo pakeitimai, vėlavimai ceche, komponentai, nauji projektai |
 | `services/analytics.py` | Cecho būsena (`floor`) ir efektyvumo ataskaita (`report`) |
 | `services/seed.py`, `demo.py` | Pavyzdiniai duomenys; `demo` – 5 projektai su visa istorija |
 | `vmgt/web/app.py` | FastAPI: tik teisės ir HTTP → `services` |
@@ -167,6 +169,28 @@ aplinka visam technologiniam keliui. Sprendimai: **VMGT tvarko katalogus pati**,
 `test_failai.py`. Pavyzdžiuose P-24121 200 lenkimui failo sąmoningai nėra
 (išleidimas rodo klaidą), P-24121 100 plazmos programa pakeista po išleidimo
 (PLZ-01 laukia meistro).
+
+## Planavimas ir pokyčių signalai (nuo 2026-10-26)
+
+Vartotojo prašymas: planuotojo lange matyti visų departamentų užduotis, o
+kiekvienas pakeitimas turi signalizuoti apie poveikį kitiems projektams.
+Sprendimai: **Gantt pagal departamentus**; **poveikio peržiūra prieš
+įrašant + pranešimai**; signalą kelia **planuotojo pakeitimai, vėlavimai
+ceche, komponentų vėlavimai, nauji projektai iš krepšelio**.
+
+| | |
+|---|---|
+| langas | `#/planas` – „Departamentų planas“ (Gantt), `#/planas/eiles` ir `#/planas/<centras>` – centrų eilės (kaip anksčiau). Eilutės – departamentai (`capacity`), juostos – etapai (gamybos / surinkimo – kiekviename bare, kuriame yra jų operacijų, `planner._phase_departments`), viršuje – savaitės apkrova. Spalva – projektas; brūkšniuota – krepšelis; raudonas kraštas – vėluoja. Projektų juosta: paryškinimas, prioritetas, „Patvirtinti…“ krepšeliui |
+| keitimas | tempti juostą (perkelti) ar dešinį kraštą (pabaiga), arba spustelėti ir įvesti datas → `POST /api/planner/impact` → langas „Pakeitimo poveikis“ (paveikti projektai su priežastimis, paties projekto įspėjimai, kas atsilaisvina, pastaba) → `apply`. Teisė `plan` arba `projects` |
+| poveikis | `planner.impact`: pakeitimas pritaikomas SAVEPOINT viduje, `capacity.report` prieš / po, atšaukiama – peržiūra lygiai tokia, kokia bus įrašius. Paveiktas = KITAS projektas, kurio darbas yra departamento savaitėje, kuri persikrovė (> 100 % – raudona) ar perlipo 85 % (geltona); eilėje – kurio darbai pasislinko (vietos ir ~valandos); prioriteto pakėlimas – kas dalijasi departamentais. Patvirtinimas iš krepšelio – lyginama tik su vykdomais (`committed`) |
+| visi keliai | projekto kortelės etapo datos, prioritetas, statusas „vykdomas“ ir centro eilės perkėlimas (`/api/tasks/{id}/move`) eina per `planner.apply` – signalas atsiranda, kad ir kur keista |
+| ceche | `signals.on_stop` – baigta operacija > 125 % normos ir ≥ 30 min. daugiau; `on_resume` – neplanuota pauzė ≥ 60 min. Paveikti – kitų projektų patvirtinti darbai TAME centre (sukurti iki to momento) |
+| komponentai | `components.save`: tiekėjas nukėlė pažadėtą datą (ir importas – tas pats kelias); `signals.scan` (skaitant pranešimus) – pažadėta data praėjo, negauta. Raudona, jei data vėlesnė už surinkimo etapo pradžią |
+| krepšelis | projektas tapo vykdomu (patvirtintas, pradėtas etapas ar darbas) – `signals.project_activated` |
+| įrašai | `plan_changes` (migracija 10; bendras žurnalas „Pokyčių signalai“, `key` – tas pats signalas tik kartą) ir `notifications` (vienam žmogui; gavėjai – projekto vadovas, neužbaigtų etapų atsakingieji, planuotojai; ne pats keitėjas). Varpelis viršuje (kas minutę), langas su priežastimis ir nuoroda |
+
+`test_planavimas.py`. Pavyzdžiuose signalai susidaro iš demo istorijos
+(vėlavimai ceche, nauji projektai, vėluojantys komponentai).
 
 ## Resursų apkrova (nuo 2026-10-25)
 

@@ -10,7 +10,7 @@ atsakyti skirtingai.
 from __future__ import annotations
 
 from .. import db
-from . import NotFound, RuleError, components, ncfiles, routing
+from . import NotFound, RuleError, components, ncfiles, routing, signals
 from .projects import PHASE_LABEL
 
 PAUSE_REASONS = [
@@ -237,8 +237,11 @@ def start(con, user, task_id) -> None:
     now = db.now()
     con.execute("INSERT INTO intervals (task_id, user_id, start) VALUES (?,?,?)", (task_id, user["id"], now))
     con.execute("UPDATE tasks SET status='vykdoma' WHERE id=?", (task_id,))
-    con.execute("UPDATE projects SET status='vykdomas' WHERE id=? AND status='krepselis'", (t["project_id"],))
+    activated = con.execute("UPDATE projects SET status='vykdomas' WHERE id=? AND status='krepselis'",
+                            (t["project_id"],)).rowcount
     _touch_phase(con, user["id"], t)
+    if activated:
+        signals.project_activated(con, user["id"], t["project_id"])
     db.log_event(con, user["id"], "task", task_id, "start")
 
 
@@ -276,10 +279,13 @@ def resume(con, user, task_id) -> None:
     if t["status"] != "pristabdyta":
         raise RuleError("Užduotis nepristabdyta")
     now = db.now()
+    pz = _open_pause(con, task_id)
     con.execute("UPDATE pauses SET end=? WHERE task_id=? AND end IS NULL", (now, task_id))
     con.execute("INSERT INTO intervals (task_id, user_id, start) VALUES (?,?,?)", (task_id, user["id"], now))
     con.execute("UPDATE tasks SET status='vykdoma' WHERE id=?", (task_id,))
     db.log_event(con, user["id"], "task", task_id, "resume")
+    if pz:
+        signals.on_resume(con, user["id"], t, pz)
 
 
 def stop(con, user, task_id, good: int, scrap: int = 0, finish: bool | None = None) -> dict:
@@ -309,6 +315,8 @@ def stop(con, user, task_id, good: int, scrap: int = 0, finish: bool | None = No
                  {"good": good, "scrap": scrap, "status": status})
     # geri vienetai iškart perduodami kitai srauto operacijai
     nxt = routing.record_transfer(con, user["id"], t, good)
+    if status == "baigta":
+        signals.on_stop(con, user["id"], t, _work_seconds(con, task_id), total_good + total_scrap)
     return {"status": status, "suggest_ncr": scrap > 0, "qty_good": total_good, "qty_scrap": total_scrap,
             "moved": good, "next": nxt}
 

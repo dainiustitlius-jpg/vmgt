@@ -142,9 +142,9 @@ $("#logout").onclick = async () => { await POST("/api/logout").catch(() => {}); 
 
 // ---------- prisijungimas ----------
 // Prisijungimo lango iliustracija – robotinės rankos brėžinys: kontūrai
-// brėžinio mėlyna, jungtys oranžinės, judesio zona ir matmuo – kaip CAD lape
+// šviesi sutemų mėlyna, jungtys baltos (VMG spalvos), judesio zona ir matmuo – kaip CAD lape
 const ARM_SVG = `<svg viewBox="0 0 360 250" fill="none" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Robotinės rankos brėžinys">
-  <g stroke="#6aa7e8" stroke-width="1.6">
+  <g stroke="#9db2d9" stroke-width="1.6">
     <path d="M20 220H340"/>
     <path d="M95 40A130 130 0 0 1 225 170" stroke-dasharray="4 5" opacity=".55"/>
     <path d="M95 150V232M85 170h20" stroke-dasharray="10 3 2 3" opacity=".5"/>
@@ -155,8 +155,8 @@ const ARM_SVG = `<svg viewBox="0 0 360 250" fill="none" stroke-linecap="round" s
     <rect x="252" y="198" width="46" height="22" rx="1"/><path d="M252 209h46" opacity=".5"/>
     <path d="M95 238H275M95 233v10M275 233v10M95 238l7-3v6zM275 238l-7-3v6z"/>
   </g>
-  <g stroke="#ff7a2e" stroke-width="2"><circle cx="95" cy="170" r="12"/><circle cx="175" cy="80" r="10"/><circle cx="275" cy="105" r="7"/></g>
-  <g fill="#ff7a2e"><circle cx="95" cy="170" r="2.5"/><circle cx="175" cy="80" r="2.5"/><circle cx="275" cy="105" r="2"/></g>
+  <g stroke="#c9ccd0" stroke-width="2"><circle cx="95" cy="170" r="12"/><circle cx="175" cy="80" r="10"/><circle cx="275" cy="105" r="7"/></g>
+  <g fill="#ffffff"><circle cx="95" cy="170" r="2.5"/><circle cx="175" cy="80" r="2.5"/><circle cx="275" cy="105" r="2"/></g>
   <g fill="#8d9aa8" font-family="Consolas, monospace" font-size="10"><text x="112" y="188">J1</text><text x="190" y="72">J2</text><text x="286" y="100">J3</text>
     <text x="168" y="232">R 1200</text><text x="236" y="56">±170°</text></g>
 </svg>`;
@@ -166,7 +166,7 @@ async function pageLogin() {
   app().innerHTML = `
   <div class="login card">
     <div class="hero">
-      <div><span class="brand">${$("#top .brand svg").outerHTML}VMGT</span><p>Projektų stebėsena ir gamybos valdymas</p></div>
+      <div><span class="brand">${$("#top .brand").innerHTML}</span><p>Projektų stebėsena ir gamybos valdymas</p></div>
       ${ARM_SVG}
       <div class="tblock"><span>VIENETINĖ METALO GAMYBA</span><span>PJOVIMAS → SUVIRINIMAS → SURINKIMAS → TESTAVIMAS</span></div>
     </div>
@@ -877,7 +877,7 @@ async function pageFloorPlan() {
         <text class="fsub" x="0.6" y="2.7">${esc(cut(t ? `${t.project_code} · ${t.assembly_code}` : c.next ? `Kitas: ${c.next.project_code}` : c.name, n))}</text>
         ${t ? `<text class="fsub" x="0.6" y="3.8">${esc(cut(t.name, n))}</text>` : ""}
         ${timer ? `<text class="ftime" x="0.6" y="${b.h - 0.6}" data-since="${c.state === "dirba" ? esc(c.since || "") : ""}" data-base="${c.work_s || 0}">${dur((c.work_s || 0) + (c.state === "dirba" && c.since ? since(c.since) : 0))}</text>`
-          : `<text class="fsub" x="0.6" y="${b.h - 0.6}">${off ? `⏾ ${esc({ svente: "šventė", nedarbo: "nedirba", remontas: "remontas", poilsio: "poilsis" }[c.calendar.kind] || "po pamainos")} · ` : ""}eilėje ${c.queue}</text>`}
+          : `<text class="fsub" x="0.6" y="${b.h - 0.6}">${esc(cut(`${off ? `⏾ ${{ svente: "šventė", nedarbo: "nedirba", remontas: "remontas", poilsio: "poilsis" }[c.calendar.kind] || "po pamainos"} · ` : ""}eilėje ${c.queue}`, n))}</text>`}
         ${c.waiting ? `<g class="fwait" transform="translate(${b.w - 2.6},${b.h - 1.9})"><rect width="2.2" height="1.4" rx="0.3"/><text x="1.1" y="1.05">⧗${c.waiting}</text></g>` : ""}
         ${alert ? `<g class="falert ${alert}" transform="translate(-0.7,-0.7)"><circle r="0.85" cx="0.85" cy="0.85"/><text x="0.85" y="1.3">!</text></g>` : ""}
         ${pc ? `<text class="fproj" x="0.6" y="${b.h + 1.1}">✓${pc.done} ▶${pc.running} ○${pc.open}</text>` : ""}

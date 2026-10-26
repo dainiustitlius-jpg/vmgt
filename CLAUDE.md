@@ -297,7 +297,7 @@ laikmatis, detalių judėjimas, projekto filtras, įspėjimai**; vieta – lange
 | būsenos | tos pačios kaip kortelėse (`analytics.floor`): dirba (žalia, mirksi lemputė), pristabdyta, gali pradėti, laukia (užrakinta, raudonas brūkšninis), laisvas; ant centro – projektas · mazgas, operacija, laikmatis (kaip terminale: uždarytų intervalų suma + naršyklė prideda atvirą) arba eilės ilgis |
 | įspėjimai | `layout._alerts`: neplanuota pauzė ≥ 60 min. (raudona), vykdoma > 125 % normos, atvira neatitiktis, failas laukia meistro – mirksintis „!“, sąrašas centro lange |
 | detalės | ⧗N – atkeliavusios ir laukiančios detalės (`routing.arrived`, susiliejusios – 1); rodyklės – šiandien perduota (`transfers`), ant rodyklės – vnt. |
-| projektas | pasirinkus – kiti centrai blankūs, projekto centrai oranžiniu kraštu su ✓ atlikta ▶ vyksta ○ laukia, rodyklės – maršruto kelias (ištisinė – praeita, brūkšninė – dar ne) |
+| projektas | pasirinkus – kiti centrai blankūs, projekto centrai mėlynu (`--accent-2`) kraštu su ✓ atlikta ▶ vyksta ○ laukia, rodyklės – maršruto kelias (ištisinė – praeita, brūkšninė – dar ne) |
 | kita | spustelėjus centrą – langas su darbu, įspėjimais, nuorodomis į terminalą ir eilę; „Visas ekranas“ – sieniniam ekranui; atsinaujina kas 10 s; telefone – slenkama kortelėje |
 
 Klasės: plano rodyklės – `.fmove` (`.flow` jau terminalo srauto eilutė).
@@ -456,24 +456,31 @@ kategoriją.
   karto (PrefabFlow laikė patvirtintą tvarką atskirai).
 - MS SQL – schema paprasta, kad perkelti būtų nesunku.
 
-## Vizualinis stilius (nuo 2026-10-25)
+## Vizualinis stilius (nuo 2026-10-25, spalvos – 2026-10-26)
 
-Vartotojo sprendimas: **šviesus inžinerinis** stilius (kaip CAD brėžinys ir
-technologinė dokumentacija), logotipas – **paprastas ženklas + VMGT**.
+Vartotojo sprendimai: **šviesus inžinerinis** stilius (kaip CAD brėžinys);
+2026-10-26 spalvos pritaikytos pagal VMG Technics pastato nuotrauką –
+**grafitas + sutemų mėlyna**, logotipas – **VMG ženklas**.
 
-- Spalvos – `app.css` `:root`. Brėžinio mėlyna `--accent` – mygtukai,
-  nuorodos. Signalinė oranžinė `--signal` – TIK ženklas ir žymekliai:
-  logotipas, juosta po antrašte, aktyvus meniu ir kortelė, antraštės žymė,
-  fokusas. Būsenai oranžinė nenaudojama: pristabdyta / „dėmesio“ – ochra
-  (`--pause`, `--h-yellow` #a87800), kitaip nesiskirtų nuo ženklo.
+- Spalvos – `app.css` `:root`: grafitas `--head` / `--fg` #20262C, sutemų
+  mėlyna `--accent` #2E3D5D (mygtukai, nuorodos), šviesesnė `--accent-2`
+  #4D6EA6 (fokusas, pažymėtas projektas cecho plane, kalendoriaus „šiandien“),
+  plieno pilka `--signal` #808386 (antraštės kvadratėlis, linija po meniu),
+  `--head-mark` – aktyvus meniu ant grafito, fonas šiltai balsvas #F4F2EC
+  (langų šviesa). Nuotraukoje ryškių spalvų nėra, todėl jos – TIK būsenoms:
+  dirba žalia, pristabdyta ochra, gali pradėti žydra, laukia pilka,
+  užrakinta / neatitiktis raudona. Oranžinės nebėra.
+- Logotipas – baltas VMG ženklas (SVG pagal nuotrauką, `index.html`
+  `.brand svg.vmg`, taip pat favicon ant grafito) + „VMG TECHNICS“
+  („TECHNICS“ siauresniame nei 1500 px ekrane slepiamas, kad meniu tilptų).
+  Prisijungimo lange – tas pats ženklas ir robotinės rankos brėžinys
+  (`ARM_SVG`, kontūrai šviesi sutemų mėlyna, jungtys baltos).
 - Fonas – brėžinio tinklelis (24 px, kas 120 px ryškesnis). Kortelės – kampų
-  žymės (`--tick`) ir oranžinis kvadratėlis prie antraštės. Būsenų žymos –
+  žymės (`--tick`) ir pilkas kvadratėlis prie antraštės. Būsenų žymos –
   „indikatoriaus lemputė“ (`.pill::before`). Kampai 2–3 px, skaičiai lentelėse
   – vienodo pločio šriftu.
-- Logotipas – stilizuota robotinės rankos jungtis (SVG `index.html`, taip pat
-  favicon). Prisijungimo lange – robotinės rankos brėžinys (`ARM_SVG`).
-- Terminalas lieka tamsus (staklių pultas), su oranžinėmis kampų žymėmis.
-  Tamsus režimas – pagal sistemos nustatymą (`prefers-color-scheme`).
+- Terminalas lieka tamsus (staklių pultas). Tamsus režimas – pagal sistemos
+  nustatymą (`prefers-color-scheme`): grafitas, akcentas #9DB2D9.
 - Rasta perdarant: srauto atšakų `.lane` sutapo su `.gantt .lane` (iškraipė
   etapų grafiką) → `.flane`; savaitės plano `.hbar` perrašė analitikos juostą
   → `.dbar`. Naujoms klasėms tikrinti, ar pavadinimas dar neužimtas.

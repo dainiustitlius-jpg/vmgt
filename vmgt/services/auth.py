@@ -35,18 +35,20 @@ PERMS = {
     "receive": "Registruoti komponentų gavimą",
     "actions": "Kurti projekto užduotis ir keisti visų užduotis",
     "meetings": "Vesti ir tvirtinti susitikimų protokolus",
+    "calendar": "Darbo kalendorius: pamainos, nedarbo dienos, remontai, papildomas darbas",
     "admin": "Vartotojai ir darbo centrai",
 }
 
 ROLES = {
     "admin": ("Administratorius", set(PERMS)),
     "vadovas": ("Projektų vadovas", {"view", "projects", "tasks", "plan", "docs", "ncr_report", "purchase",
-                                     "actions", "meetings"}),
+                                     "actions", "meetings", "calendar"}),
     "pirkimai": ("Pirkimų specialistas", {"view", "purchase", "receive", "actions"}),
     "sandelis": ("Sandėlininkas", {"view", "receive"}),
-    "planuotojas": ("Planuotojas", {"view", "plan", "ncr_report", "actions"}),
+    "planuotojas": ("Planuotojas", {"view", "plan", "ncr_report", "actions", "calendar"}),
     "technologas": ("Technologas", {"view", "tasks", "release", "docs", "ncr_report", "actions"}),
-    "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report", "receive", "actions"}),
+    "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report", "receive", "actions",
+                              "calendar"}),
     "operatorius": ("Operatorius", {"execute", "ncr_report"}),
     "kokybe": ("Kokybės inžinierius", {"view", "ncr_report", "ncr_manage", "quality", "actions"}),
     "perziura": ("Peržiūra", {"view"}),

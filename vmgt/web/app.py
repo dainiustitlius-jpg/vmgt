@@ -17,7 +17,8 @@ from .. import config as cfgmod
 from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
                         importer, layout, meetings, ncfiles, ncr, planner, projects, quality, routing, seed,
-                        signals, tasks)
+                        signals, tasks, workcal)
+from ..services.forecast import forecast
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -141,6 +142,10 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
         comps = components.list_components(con, project_id=pid)
         p["components"] = comps
         p["components_summary"] = components.summary(comps)
+        # operacijų prognozė pagal centrų eiles ir darbo kalendorių
+        fc = forecast(con)
+        for t in p["tasks"]:
+            t["forecast"] = fc.get(t["id"])
         return p
 
     @app.put("/api/projects/{pid}")
@@ -244,6 +249,42 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
     def area_put(aid: int, body: dict, user=Depends(need("admin")), con=Depends(get_con)):
         projects.save_area(con, user["id"], body, aid)
         return {"ok": True}
+
+    # ---------- darbo kalendorius ----------
+
+    @app.get("/api/calendar")
+    def cal_year(scope: str = "factory", id: int = 0, year: int = 0, user=Depends(need("view")),
+                 con=Depends(get_con)):
+        return workcal.year_view(con, scope, id, year or int(db.now()[:4]))
+
+    @app.get("/api/calendar/patterns")
+    def cal_patterns(user=Depends(need("view")), con=Depends(get_con)):
+        return workcal.list_patterns(con)
+
+    @app.post("/api/calendar/patterns")
+    def cal_pattern_new(body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        return {"id": workcal.save_pattern(con, user["id"], body)}
+
+    @app.put("/api/calendar/patterns/{pid}")
+    def cal_pattern_put(pid: int, body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        # šablono pakeitimas keičia visų jį naudojančių darbo laiką – su poveikiu
+        def do():
+            workcal.save_pattern(con, user["id"], body, pid)
+            return {"summary": f"Pamainų šablonas „{body.get('name', '')}“ pakeistas"}
+        return planner.calendar_change(con, user, do, body.get("note", ""))
+
+    @app.put("/api/calendar/pattern")
+    def cal_set_pattern(body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        def do():
+            workcal.set_pattern(con, user["id"], body.get("scope"), body.get("scope_id"), body.get("pattern_id"))
+            v = workcal.year_view(con, body.get("scope"), body.get("scope_id"), int(db.now()[:4]))
+            return {"summary": f"{v['name']}: pamainos – {v['pattern']['name'] if v['pattern'] else '—'}"
+                               f"{'' if body.get('pattern_id') else ' (paveldėta)'}"}
+        return planner.calendar_change(con, user, do, body.get("note", ""))
+
+    @app.post("/api/calendar/days")
+    def cal_days(body: dict, user=Depends(need("calendar")), con=Depends(get_con)):
+        return planner.calendar_change(con, user, lambda: workcal.set_days(con, user["id"], body), body.get("note", ""))
 
     # ---------- planuotojo Gantt, poveikis, signalai ----------
 

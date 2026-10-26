@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from .. import db
-from . import NotFound, RuleError, capacity, projects, signals, tasks
+from . import NotFound, RuleError, capacity, projects, signals, tasks, workcal
 
 WEEKS = 16
 KINDS = ("phase", "priority", "queue", "activate")
@@ -61,8 +61,10 @@ def board(con, weeks: int = 12, include_basket=True) -> dict:
                 bars[dept_id].append({**_bar(ph, today), "share": share})
     rows = []
     cap_by = {r["id"]: r for r in cap["departments"]}
+    cal = workcal.Calendar(con)
     for d in depts:
         rows.append({"id": d["id"], "code": d["code"], "name": d["name"], "kind": d["kind"],
+                     "off": _off_days(cal, d, start, end),
                      "capacity_week": cap_by[d["id"]]["capacity_week"],
                      "load": [{"week": c["week"], "util": c["util"], "shortage": c["shortage"],
                                "hours": round(c["committed"] + (c["basket"] if include_basket else 0), 1)}
@@ -72,6 +74,27 @@ def board(con, weeks: int = 12, include_basket=True) -> dict:
             "weeks": cap["weeks"], "departments": rows, "projects": plist,
             "unplaced": [{"phase_id": p["id"], "project_id": p["project_id"], "kind": p["kind"],
                           "label": projects.PHASE_LABEL.get(p["kind"], p["kind"])} for p in unplaced]}
+
+
+def _off_days(cal, d, start, end) -> list[dict]:
+    """Departamento neįprastos dienos grafikui: nedarbo (savaitgalis, šventė,
+    uždaryta), papildomas darbas, remontas; barui – ir jo centrų remontai."""
+    scope = ("area", d["area_id"]) if d["kind"] == "production" and d["area_id"] else ("factory", 0)
+    centres = [c for c in cal.centres.values() if scope[0] == "area" and c["area_id"] == scope[1] and c["active"]]
+    out, x = [], start
+    while x <= end:
+        day = cal.day(*scope, x)
+        if day["kind"] != "darbo":
+            out.append({"d": x.isoformat(), "kind": day["kind"], "off": not day["minutes"],
+                        "text": day["label"] + (f": {day['note']}" if day["note"] else "")
+                        + (f" ({day['hours']})" if day["minutes"] and day["kind"] != "poilsio" else "")})
+        rep = [c["code"] for c in centres if cal.day("centre", c["id"], x)["kind"] == "remontas"
+               and cal.day("centre", c["id"], x)["own"]]
+        if rep and day["minutes"]:
+            out.append({"d": x.isoformat(), "kind": "remontas", "off": False,
+                        "text": "Remontas: " + ", ".join(rep)})
+        x += timedelta(days=1)
+    return out
 
 
 def _bar(ph, today) -> dict:
@@ -289,14 +312,16 @@ def _finish(con, pid, change, affected, freed, own) -> dict:
     for x in merged.values():
         pr = db.row(con.execute("SELECT code, name FROM projects WHERE id=?", (x["project_id"],)))
         x["code"], x["name"] = pr["code"], pr["name"]
-    p = db.row(con.execute("SELECT code, name FROM projects WHERE id=?", (pid,)))
-    return {"project_id": pid, "project_code": p["code"], "summary": describe(con, change),
+    p = db.row(con.execute("SELECT code, name FROM projects WHERE id=?", (pid,))) if pid else None
+    return {"project_id": pid, "project_code": p["code"] if p else None, "summary": describe(con, change),
             "affected": sorted(merged.values(), key=lambda x: (x["severity"] != "red", x["code"])),
             "freed": freed, "own": own}
 
 
 def describe(con, change) -> str:
     k = change["kind"]
+    if k == "calendar":
+        return change["summary"]
     if k == "phase":
         ph = db.row(con.execute("SELECT ph.*, p.code, a.code AS ac FROM phases ph JOIN projects p ON p.id=ph.project_id "
                                 "LEFT JOIN assemblies a ON a.id=ph.assembly_id WHERE ph.id=?", (change["phase_id"],)))
@@ -326,6 +351,58 @@ def apply(con, user, change: dict, note: str = "") -> dict:
     else:
         imp["change_id"] = signals.record(con, user["id"], kind, pid, imp["summary"], imp["affected"], note, imp["own"])
     return imp
+
+
+# ---------- darbo kalendorius ----------
+
+def calendar_change(con, user, do, note: str = "") -> dict:
+    """Kalendoriaus pakeitimas (nedarbo diena, remontas, pamaina) paveikia
+    visų tame bare / centre dirbančių projektų darbus. `do()` įrašo pakeitimą
+    ir grąžina {summary}; prieš ir po palyginamos apkrovos savaitės ir
+    operacijų prognozė – paveiktiems projektams išsiunčiami pranešimai."""
+    from . import forecast
+    before, fb = _snapshot(con), forecast.forecast(con)
+    res = do()
+    after, fa = _snapshot(con), forecast.forecast(con)
+    affected, freed = _compare(before, after, None)
+    moved, earlier = _forecast_affected(con, fb, fa)
+    imp = _finish(con, None, {"kind": "calendar", "summary": res["summary"]}, affected + moved, freed + earlier, [])
+    imp["change_id"] = signals.record(con, user["id"], "calendar", None, imp["summary"], imp["affected"], note,
+                                      link="#/kalendorius")
+    return {**res, **imp}
+
+
+def _forecast_affected(con, fb, fa) -> tuple[list[dict], list[str]]:
+    """Kurių projektų operacijos dėl kalendoriaus baigsis vėliau (≥ 1 val.)
+    arba nebespės iki etapo pabaigos; kurių – anksčiau."""
+    ids = [i for i in fa if i in fb]
+    info = {r["id"]: r for r in db.rows(con.execute(
+        f"SELECT t.id, t.project_id, t.name, c.code AS centre, a.code AS asm FROM tasks t "
+        f"JOIN work_centres c ON c.id=t.centre_id JOIN assemblies a ON a.id=t.assembly_id "
+        f"WHERE t.id IN ({','.join('?' * len(ids))})", ids))} if ids else {}
+    per, early = {}, {}
+    fmt = workcal.local_text
+    for i in ids:
+        a, b = fb[i], fa[i]
+        if not (a["end"] or b["end"]):
+            continue
+        t = info[i]
+        late = (b["end"] is None) or (a["end"] and b["end"] > a["end"]
+                                      and (db.parse_ts(b["end"]) - db.parse_ts(a["end"])).total_seconds() >= 3600)
+        if late:
+            x = per.setdefault(t["project_id"], {"project_id": t["project_id"], "severity": "yellow", "reasons": []})
+            newly = b["late"] and not a["late"]
+            if newly:
+                x["severity"] = "red"
+            x["reasons"].append(f"{t['centre']}: {t['asm']} · {t['name']} baigsis {fmt(a['end'])} → {fmt(b['end'])}"
+                                + (f" – nespės iki {b['due']}" if newly else ""))
+        elif a["end"] and b["end"] and (db.parse_ts(a["end"]) - db.parse_ts(b["end"])).total_seconds() >= 3600:
+            early[t["project_id"]] = early.get(t["project_id"], 0) + 1
+    for x in per.values():
+        if len(x["reasons"]) > 5:
+            x["reasons"] = x["reasons"][:5] + [f"ir dar {len(x['reasons']) - 5} operacijų"]
+    codes = dict(con.execute("SELECT id, code FROM projects").fetchall())
+    return list(per.values()), [f"{codes.get(p)}: {n} operacijų baigsis anksčiau" for p, n in early.items()]
 
 
 def impact_of_activation(con, project_id) -> dict:

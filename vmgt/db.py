@@ -537,6 +537,35 @@ MIGRATIONS: list[str] = [
         at TEXT NOT NULL
     );
     """,
+    # 13 – darbo kalendorius: pamainų šablonai (gamyklai, barui, centrui) ir
+    # dienų išimtys (nedarbo diena, remontas, papildomas darbas, kitas laikas).
+    # Laikas – vietinis (HH:MM), nes pamaina nesikeičia keičiantis vasaros laikui.
+    """
+    CREATE TABLE shift_patterns (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        week TEXT NOT NULL,                     -- JSON {"0": "07:00-11:00, 11:30-15:30", … "6": ""}, 0 – pirmadienis
+        active INTEGER NOT NULL DEFAULT 1
+    );
+    INSERT INTO shift_patterns (name, week) VALUES
+        ('1 pamaina', '{"0":"07:00-11:00, 11:30-15:30","1":"07:00-11:00, 11:30-15:30","2":"07:00-11:00, 11:30-15:30","3":"07:00-11:00, 11:30-15:30","4":"07:00-11:00, 11:30-15:30","5":"","6":""}'),
+        ('2 pamainos', '{"0":"06:00-10:00, 10:30-18:30, 19:00-23:00","1":"06:00-10:00, 10:30-18:30, 19:00-23:00","2":"06:00-10:00, 10:30-18:30, 19:00-23:00","3":"06:00-10:00, 10:30-18:30, 19:00-23:00","4":"06:00-10:00, 10:30-18:30, 19:00-23:00","5":"","6":""}');
+    INSERT INTO settings (key, value) VALUES ('factory_pattern', '1');
+    ALTER TABLE areas ADD COLUMN shift_pattern_id INTEGER REFERENCES shift_patterns(id);
+    ALTER TABLE work_centres ADD COLUMN shift_pattern_id INTEGER REFERENCES shift_patterns(id);
+    CREATE TABLE calendar_days (
+        id INTEGER PRIMARY KEY,
+        scope TEXT NOT NULL,                    -- factory / area / centre
+        scope_id INTEGER NOT NULL DEFAULT 0,    -- gamyklai 0
+        day TEXT NOT NULL,                      -- YYYY-MM-DD
+        kind TEXT NOT NULL,                     -- nedarbo / remontas / papildomas / kitas
+        hours TEXT NOT NULL DEFAULT '',         -- „07:00-15:30“; remontui tuščia – visa diena
+        note TEXT NOT NULL DEFAULT '',
+        user_id INTEGER REFERENCES users(id),
+        at TEXT NOT NULL,
+        UNIQUE (scope, scope_id, day)
+    );
+    """,
 ]
 
 

@@ -478,3 +478,47 @@ table.tedit td.mono, table.tedit td .mono { white-space: nowrap; }
 .ncr8:first-of-type { border-top: 0; }
 @media (max-width: 640px) { .tqrow { grid-template-columns: 24px 1fr; } .tqa { grid-column: 1 / -1; justify-content: start; } }
 @media print { .dossier .card { break-inside: avoid; } }
+
+/* darbo kalendorius: metų vaizdas – 12 mėnesių tinkleliu, dienos spalva – rūšis.
+   Išimtis, įrašyta šiame kalendoriuje – ištisinis kraštas, paveldėta – taškinis. */
+.calbar { gap: 8px 16px; margin: 6px 0; }
+.calleg { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }
+.calleg span { display: inline-flex; align-items: center; gap: 5px; }
+.calleg .cday, .ckinds .cday, td .cday { width: 14px; height: 14px; display: inline-block; padding: 0; vertical-align: -2px; }
+.yrcal { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 14px 18px; margin-top: 8px; user-select: none; }
+.mcal b { font-size: 13px; }
+.mgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: 3px; }
+.mgrid i { font-style: normal; font-size: 10.5px; color: var(--muted); text-align: center; }
+.cday { --k: var(--paper); background: var(--k); border: 1px solid var(--line-soft); border-radius: 2px; color: var(--fg);
+  font: 12px/1 var(--f-mono); padding: 6px 0; text-align: center; cursor: pointer; min-width: 0; }
+.cday:hover { border-color: var(--accent); }
+.cday.k-poilsio { --k: var(--thead); color: var(--muted); }
+.cday.k-svente { --k: color-mix(in srgb, var(--bad) 22%, var(--paper)); }
+.cday.k-nedarbo { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--bad) 26%, var(--paper)) 0 3px, var(--paper) 3px 6px); }
+.cday.k-remontas { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pause) 34%, var(--paper)) 0 3px, var(--paper) 3px 6px); }
+.cday.k-remontas.part { background: linear-gradient(180deg, var(--paper) 50%, color-mix(in srgb, var(--pause) 34%, var(--paper)) 50%); }
+.cday.k-papildomas { --k: color-mix(in srgb, var(--ok) 26%, var(--paper)); }
+.cday.k-kitas { --k: color-mix(in srgb, var(--accent) 20%, var(--paper)); }
+.cday.own { border: 2px solid var(--fg); padding: 5px 0; }
+.cday.inh { border: 1px dotted var(--fg); }
+.cday.now { box-shadow: inset 0 -3px 0 var(--signal); font-weight: 700; }
+.cday.sel { outline: 2px solid var(--accent); outline-offset: -1px; background: color-mix(in srgb, var(--accent) 30%, var(--paper)); }
+.ckinds { display: grid; gap: 4px; margin: 6px 0; }
+.ckinds .cday { cursor: default; }
+.ptform label { margin: 0; }
+/* Gantt fone – kalendoriaus nedarbo dienos ir išimtys */
+.goff { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 0; background: color-mix(in srgb, var(--wait) 14%, transparent); }
+.goff.k-svente, .goff.k-nedarbo { background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.goff.k-papildomas { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.goff.k-kitas { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.goff.k-remontas { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pause) 30%, transparent) 0 3px, transparent 3px 6px); }
+.gload, .glane { z-index: 1; }
+/* prognozė eilėje ir projekte */
+.fcst { font-size: 13px; }
+.fcst.late b { color: var(--bad); }
+/* ne darbo laikas ceche ir terminale */
+.offc { color: var(--wait); font-size: 13px; }
+.tm .offc.big-off { color: #c9d3dd; background: #223040; border: 1px dashed #4a5b6e; padding: 10px 14px; font-size: 17px; margin-bottom: 10px; }
+.fc.off .fcr { fill: var(--thead); stroke-dasharray: 0.5 0.4; }
+.fc.off text { opacity: .7; }
+.lg.off { background: var(--thead); border: 1px dashed var(--muted); }

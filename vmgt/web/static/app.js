@@ -89,6 +89,7 @@ const ROUTES = [
   [/^#\/m\/(naujas)\/(\d+)$/, pageMeetingEdit],
   [/^#\/m\/(\d+)\/keisti$/, pageMeetingEdit],
   [/^#\/cechas(?:\/(planas|korteles))?$/, pageFloor],
+  [/^#\/planas\/kalendorius(?:\/(factory|area|centre)\/(\d+))?$/, pageCalendar],
   [/^#\/planas(?:\/([\w-]+))?$/, pagePlan],
   [/^#\/t(?:\/([\w-]+))?$/, pageTerminal],
   [/^#\/r\/(\d+)(?:\/d\/([^/]+))?$/, pageRoute],
@@ -310,13 +311,14 @@ async function pageProject(pid, tab) {
         <div class="row">${rel ? pill("baigta", `išleista į gamybą ${dt(a.released_at)}`) : ts.length ? pill("laukia", "juodraštis – neišleista") : ""}
           ${edt ? `<a class="btn ghost small" href="#/technologija/${a.id}">Technologija ir failai →</a>` : ""}
           ${ts.length ? `<a class="btn ghost small" href="#/r/${a.id}">Srautas ir atsekamumas →</a>` : ""}</div></div>
-      <div class="tbl"><table><thead><tr><th>Seka</th><th>Detalė</th><th>Centras</th><th>Operacija</th><th>Kiekis</th><th>Norma</th><th>Brėžinys</th><th>Būsena</th><th></th></tr></thead><tbody>
+      <div class="tbl"><table><thead><tr><th>Seka</th><th>Detalė</th><th>Centras</th><th>Operacija</th><th>Kiekis</th><th>Norma</th><th>Brėžinys</th><th>Būsena</th><th>Prognozė</th><th></th></tr></thead><tbody>
       ${ts.map(t => `<tr><td class="num">${t.seq}</td><td class="mono">${t.part_no ? esc(t.part_no) : '<span class="muted">mazgas</span>'}</td><td class="mono">${esc(t.centre_code)}</td><td>${esc(t.name)}</td>
         <td class="num">${t.qty_good}/${t.qty_plan}${t.qty_scrap ? ` <span class="s-late">brokas ${t.qty_scrap}</span>` : ""}</td>
         <td class="num">${t.norm_min ? t.norm_min + " min/vnt" : "—"}</td>
         <td>${t.drawing_no ? `<a href="/api/drawings/${encodeURIComponent(t.drawing_no)}/file?rev=${encodeURIComponent(t.drawing_rev)}" target="_blank">${esc(t.drawing_no)} ${esc(t.drawing_rev)}</a>` : "—"}</td>
         <td>${pill(t.status, t.status)}${t.approved ? "" : ' <span class="muted">nepatvirtinta</span>'}</td>
-        <td>${edt && !rel && t.status === "laukia" && !t.qty_good ? `<button class="small ghost" data-del="${t.id}">Šalinti</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">Operacijų nėra.</td></tr>`}
+        <td>${t.status === "baigta" ? "" : fcCell(t.forecast)}</td>
+        <td>${edt && !rel && t.status === "laukia" && !t.qty_good ? `<button class="small ghost" data-del="${t.id}">Šalinti</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="10" class="muted">Operacijų nėra.</td></tr>`}
       </tbody></table></div>
       ${edt && rel ? `<p class="muted">Maršrutas išleistas į gamybą ir užrakintas. Keisti – „Srautas ir atsekamumas“ → „Keisti maršrutą“.</p>` : ""}
       ${edt && !rel ? `<form class="inline newt" data-a="${a.id}" style="margin-top:8px">
@@ -743,6 +745,7 @@ async function pageFloor(view) {
       return `<a class="wc ${s.state}" href="${link}">
         <div class="row between"><b class="mono">${esc(s.centre.code)}</b>${pill(s.state, label[s.state])}</div>
         <div class="muted">${esc(s.centre.name)}</div>
+        ${s.calendar && !s.calendar.working ? `<div class="offc">⏾ ${esc(s.calendar.why)}${s.calendar.next ? ` · nuo ${dt(s.calendar.next)}` : ""}</div>` : ""}
         ${t ? `<div><b>${esc(t.project_code)} · ${esc(t.assembly_code)}</b><br>${esc(t.name)}</div>
           <div class="t" data-since="${s.state === "dirba" ? esc(s.since || "") : ""}" data-base="${s.work_s || 0}">${dur((s.work_s || 0) + (s.state === "dirba" && s.since ? since(s.since) : 0))}</div>
           <div class="muted">${esc(s.who || "")}${s.pause ? ` · ${esc(s.pause)}` : ""}</div>`
@@ -794,14 +797,16 @@ async function pageFloorPlan() {
       const b = c.box, t = c.task, pc = inProj(c.id), n = Math.floor(b.w * 1.45);
       const alert = c.alerts.length ? c.alerts.some(x => x.severity === "red") ? "red" : "yellow" : "";
       const timer = (c.state === "dirba" || c.state === "pristabdyta") && t;
-      return `<g class="fc st-${c.state} ${ov && !pc ? "dim" : ""} ${pc ? "inproj" : ""}" data-c="${c.id}" data-a="${a.id}" transform="translate(${b.x},${b.y})" tabindex="0" role="button" aria-label="${esc(c.code)} ${esc(ST_LABEL[c.state])}">
+      // ne darbo laikas (šventė, remontas, po pamainos) – blankus, nebent kas dirba
+      const off = c.calendar && !c.calendar.working && !timer;
+      return `<g class="fc st-${c.state} ${off ? "off" : ""} ${ov && !pc ? "dim" : ""} ${pc ? "inproj" : ""}" data-c="${c.id}" data-a="${a.id}" transform="translate(${b.x},${b.y})" tabindex="0" role="button" aria-label="${esc(c.code)} ${esc(ST_LABEL[c.state])}">
         <rect class="fcr" width="${b.w}" height="${b.h}" rx="0.4"/>
         <circle class="led" cx="${b.w - 0.9}" cy="0.9" r="0.45"/>
         <text class="fcode" x="0.6" y="1.5">${esc(cut(c.code, n - 2))}</text>
         <text class="fsub" x="0.6" y="2.7">${esc(cut(t ? `${t.project_code} · ${t.assembly_code}` : c.next ? `Kitas: ${c.next.project_code}` : c.name, n))}</text>
         ${t ? `<text class="fsub" x="0.6" y="3.8">${esc(cut(t.name, n))}</text>` : ""}
         ${timer ? `<text class="ftime" x="0.6" y="${b.h - 0.6}" data-since="${c.state === "dirba" ? esc(c.since || "") : ""}" data-base="${c.work_s || 0}">${dur((c.work_s || 0) + (c.state === "dirba" && c.since ? since(c.since) : 0))}</text>`
-          : `<text class="fsub" x="0.6" y="${b.h - 0.6}">eilėje ${c.queue}</text>`}
+          : `<text class="fsub" x="0.6" y="${b.h - 0.6}">${off ? `⏾ ${esc({ svente: "šventė", nedarbo: "nedirba", remontas: "remontas", poilsio: "poilsis" }[c.calendar.kind] || "po pamainos")} · ` : ""}eilėje ${c.queue}</text>`}
         ${c.waiting ? `<g class="fwait" transform="translate(${b.w - 2.6},${b.h - 1.9})"><rect width="2.2" height="1.4" rx="0.3"/><text x="1.1" y="1.05">⧗${c.waiting}</text></g>` : ""}
         ${alert ? `<g class="falert ${alert}" transform="translate(-0.7,-0.7)"><circle r="0.85" cx="0.85" cy="0.85"/><text x="0.85" y="1.3">!</text></g>` : ""}
         ${pc ? `<text class="fproj" x="0.6" y="${b.h + 1.1}">✓${pc.done} ▶${pc.running} ○${pc.open}</text>` : ""}
@@ -842,7 +847,7 @@ async function pageFloorPlan() {
     ${edit ? `<p class="warn">Redagavimas: tempkite barus (už pavadinimo ar tuščios vietos) ir centrus, kampo kvadratėliu keiskite dydį. Centras lieka savo baro viduje.</p>` : ""}
     <div class="card fwrap" id="fwrap"><div id="fplan"></div>
       <div class="flegend muted small"><span><i class="lg st-dirba"></i>dirba</span><span><i class="lg st-pristabdyta"></i>pristabdyta</span><span><i class="lg st-gali"></i>gali pradėti</span>
-        <span><i class="lg st-laukia"></i>laukia (užrakinta)</span><span><i class="lg st-tuscia"></i>laisvas</span><span>⧗ – atkeliavusios detalės laukia</span><span class="lgal">!</span> įspėjimas
+        <span><i class="lg st-laukia"></i>laukia (užrakinta)</span><span><i class="lg st-tuscia"></i>laisvas</span><span><i class="lg off"></i>ne darbo laikas</span><span>⧗ – atkeliavusios detalės laukia</span><span class="lgal">!</span> įspėjimas
         ${flows ? `<span>→ šiandien perduota (vnt.)</span>` : ""}${data.project ? `<span class="lgp">→ ${esc(data.project.code)} kelias (✓ atlikta ▶ vyksta ○ laukia)</span>` : ""}</div></div>`;
     $("#f-flow").onchange = e => { flows = e.target.checked; try { localStorage.setItem("pf.fflow", flows ? "1" : "0"); } catch {} draw(); };
     $("#f-proj").onchange = e => { pid = e.target.value; try { localStorage.setItem("pf.fproj", pid); } catch {} draw(); };
@@ -909,13 +914,14 @@ function centreModal(c, a) {
       <div class="timer-s mono">${dur((c.work_s || 0) + (c.state === "dirba" && c.since ? since(c.since) : 0))}</div>
       ${c.pause ? `<div class="warn">⏸ ${esc(c.pause)}</div>` : ""}</div>`
       : c.next ? `<p>Kitas eilėje: <b>${esc(c.next.project_code)} · ${esc(c.next.assembly_code)}</b> ${esc(c.next.name)}</p>${c.lock ? `<p class="lock">🔒 ${esc(c.lock)}</p>` : ""}` : `<p class="muted">Eilėje darbų nėra.</p>`}
+    ${c.calendar && !c.calendar.working ? `<p class="offc">⏾ ${esc(c.calendar.why)}${c.calendar.next ? ` · darbas nuo ${dt(c.calendar.next)}` : ""}</p>` : ""}
     <p>Eilėje: <b>${c.queue}</b>${c.waiting ? ` · atkeliavusių detalių laukia: <b>${c.waiting}</b>` : ""}</p>
-    <div class="row">${can("execute") ? `<a class="btn" href="#/t/${esc(c.code)}">Terminalas</a>` : ""}${can("plan") ? `<a class="btn ghost" href="#/planas/${esc(c.code)}">Centro eilė</a>` : ""}
+    <div class="row">${can("execute") ? `<a class="btn" href="#/t/${esc(c.code)}">Terminalas</a>` : ""}${can("plan") ? `<a class="btn ghost" href="#/planas/${esc(c.code)}">Centro eilė</a>` : ""}${can("view") ? `<a class="btn ghost" href="#/planas/kalendorius/centre/${c.id}">Kalendorius</a>` : ""}
       <button class="ghost" id="cm-x">Uždaryti</button></div>`, () => { $("#cm-x").onclick = closeModal; });
 }
 
 // ---------- planas ----------
-const planTabs = on => `<nav class="tabs"><a href="#/planas" class="${on === "g" ? "on" : ""}">Departamentų planas</a><a href="#/planas/eiles" class="${on === "q" ? "on" : ""}">Centrų eilės</a></nav>`;
+const planTabs = on => `<nav class="tabs"><a href="#/planas" class="${on === "g" ? "on" : ""}">Departamentų planas</a><a href="#/planas/eiles" class="${on === "q" ? "on" : ""}">Centrų eilės</a><a href="#/planas/kalendorius" class="${on === "k" ? "on" : ""}">Darbo kalendorius</a></nav>`;
 
 async function pagePlan(code) {
   if (!code) return pagePlanner();
@@ -930,17 +936,19 @@ async function pagePlan(code) {
     <select id="pc">${centreOptions(centres, code)}</select></div>${planTabs("q")}
   <div class="card"><div class="row between"><h2>${esc(r.centre.code)} ${esc(r.centre.name)}</h2>
     <button id="appr" ${unapproved ? "" : "disabled"}>Patvirtinti eilę${unapproved ? ` (${unapproved} naujos)` : ""}</button></div>
-    <p class="muted">Terminalas rodo tik patvirtintas užduotis. ${r.centre.strict_order ? "Šiame centre griežta eilė: pradėti galima tik pirmą." : "Operatorius gali rinktis iš eilės."}</p>
-    <div class="tbl"><table><thead><tr><th>#</th><th>Projektas · mazgas</th><th>Operacija</th><th>Kiekis</th><th>Terminas</th><th>Būsena</th><th>Kliūtis</th><th></th></tr></thead>
+    <p class="muted">Terminalas rodo tik patvirtintas užduotis. ${r.centre.strict_order ? "Šiame centre griežta eilė: pradėti galima tik pirmą." : "Operatorius gali rinktis iš eilės."}
+      Prognozė – pagal eilę, normas ir <a href="#/planas/kalendorius/centre/${r.centre.id}">centro darbo kalendorių</a>.</p>
+    <div class="tbl"><table><thead><tr><th>#</th><th>Projektas · mazgas</th><th>Operacija</th><th>Kiekis</th><th>Terminas</th><th>Prognozė</th><th>Būsena</th><th>Kliūtis</th><th></th></tr></thead>
     <tbody>${r.tasks.map((t, i) => `<tr class="${t.approved ? "" : "dim"}">
       <td class="num">${i + 1}</td><td><b class="mono">${esc(t.project_code)}</b> · ${esc(t.assembly_code)} ${esc(t.assembly_name)}</td>
       <td>${esc(t.name)}${t.part_no ? ` <span class="muted mono">${esc(t.part_no)}</span>` : ""}<div class="muted small">→ ${t.next.map(d => d.task_id ? esc(d.centre_code) : esc(d.label)).join(", ")}</div></td>
       <td class="num">${t.qty_good}/${t.qty_plan}</td><td class="num">${esc(t.due_date || "—")} <span class="muted">P${t.priority}</span></td>
+      <td>${fcCell(t.forecast)}</td>
       <td>${pill(t.status, t.status)} ${t.approved ? "" : '<span class="muted">nepatvirtinta</span>'}</td>
       <td class="lock">${esc(t.lock || "")}${t.components_missing ? `<div class="warn">⚠ negauti komponentai: ${t.components_missing} eil.</div>` : ""}</td>
       <td class="row" style="flex-wrap:nowrap"><button class="small ghost" data-mv="top" data-id="${t.id}" title="Į pradžią">⤒</button>
         <button class="small ghost" data-mv="up" data-id="${t.id}">▲</button><button class="small ghost" data-mv="down" data-id="${t.id}">▼</button></td></tr>`).join("")
-      || `<tr><td colspan="8" class="muted">Eilėje užduočių nėra.</td></tr>`}</tbody></table></div></div>`;
+      || `<tr><td colspan="9" class="muted">Eilėje užduočių nėra.</td></tr>`}</tbody></table></div></div>`;
   $("#pc").onchange = e => (location.hash = `#/planas/${e.target.value}`);
   $("#appr").onclick = async () => { await act(() => POST(`/api/plan/${code}/approve`), "Eilė patvirtinta"); pagePlan(code); };
   $$("[data-mv]").forEach(b => b.onclick = async () => {
@@ -951,10 +959,191 @@ async function pagePlan(code) {
   });
 }
 
+// ---------- darbo kalendorius: gamykla → baras → centras, metų vaizdas ----------
+// Spustelėjus dieną (ar pele pažymėjus kelias) – išimtis: nedarbo diena,
+// remontas, papildomas darbas, kitas laikas. Įrašius serveris parodo, kurių
+// projektų operacijos dėl to pasislinko, ir jiems praneša.
+const CAL_KIND = { darbo: "Darbo diena", poilsio: "Poilsio diena", svente: "Šventė", nedarbo: "Nedarbo diena",
+  remontas: "Remontas / priežiūra", papildomas: "Papildomas darbas", kitas: "Kitas darbo laikas" };
+const MONTHS = ["Sausis", "Vasaris", "Kovas", "Balandis", "Gegužė", "Birželis", "Liepa", "Rugpjūtis", "Rugsėjis", "Spalis", "Lapkritis", "Gruodis"];
+const WD = ["Pr", "An", "Tr", "Kt", "Pn", "Št", "Sk"];
+// savaitė glaustai: vienodos iš eilės dienos – viena dalis („Pr–Pn 07:00-15:30“)
+const weekText = week => {
+  const out = [];
+  week.forEach((w, i) => { const l = out[out.length - 1]; if (l && l.w === w && l.b === i - 1) l.b = i; else out.push({ w, a: i, b: i }); });
+  return out.filter(x => x.w).map(x => `${WD[x.a]}${x.b > x.a ? "–" + WD[x.b] : ""} ${x.w}`).join(" · ") || "be darbo dienų";
+};
+const calTip = x => `${x.date} ${WD[(new Date(x.date + "T00:00:00Z").getUTCDay() + 6) % 7]} · ${CAL_KIND[x.kind]}${x.note ? `: ${x.note}` : ""}\n${x.minutes ? `${x.hours} (${Math.round(x.minutes / 6) / 10} val.)` : "nedirbama"}${x.src && !x.own ? `\npaveldėta: ${x.src.startsWith("factory") ? "gamykla" : x.src.startsWith("area") ? "baras" : "centras"}` : ""}`;
+
+async function pageCalendar(scope, id) {
+  scope = scope || "factory"; id = +(id || 0);
+  let year = S.calYear || +today().slice(0, 4);
+  const [areas, centres] = await Promise.all([GET("/api/areas"), GET("/api/centres")]);
+  const draw = async () => {
+    const [r, pats] = await Promise.all([GET(`/api/calendar?scope=${scope}&id=${id}&year=${year}`), GET("/api/calendar/patterns")]);
+    const edit = can("calendar");
+    const byDate = Object.fromEntries(r.days.map(x => [x.date, x]));
+    const now = today();
+    const month = m => {
+      const first = new Date(Date.UTC(year, m, 1)), pad = (first.getUTCDay() + 6) % 7, n = new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
+      const cells = Array(pad).fill(`<span></span>`);
+      for (let d = 1; d <= n; d++) {
+        const iso = `${year}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`, x = byDate[iso];
+        cells.push(`<button class="cday k-${x.kind} ${x.own ? "own" : x.src ? "inh" : ""} ${x.kind === "remontas" && x.minutes ? "part" : ""} ${iso === now ? "now" : ""}"
+          data-d="${iso}" title="${esc(calTip(x))}" ${edit ? "" : "tabindex='-1'"}>${d}</button>`);
+      }
+      return `<div class="mcal"><b>${MONTHS[m]}</b><div class="mgrid">${WD.map(w => `<i>${w}</i>`).join("")}${cells.join("")}</div></div>`;
+    };
+    const srcLabel = { factory: "gamyklos", area: "baro", centre: "centro" }[r.pattern_src];
+    app().innerHTML = `<div class="row between"><h1>Planavimas</h1>
+      <div class="row"><select id="k-scope" aria-label="Kieno kalendorius"><option value="factory:0">Gamykla (visiems)</option>
+        <optgroup label="Barai">${areas.map(a => `<option value="area:${a.id}" ${scope === "area" && a.id === id ? "selected" : ""}>${esc(a.code)} ${esc(a.name)}</option>`).join("")}</optgroup>
+        ${byArea(centres).map(g => `<optgroup label="${esc(g.name)}">${g.items.map(c => `<option value="centre:${c.id}" ${scope === "centre" && c.id === id ? "selected" : ""}>${esc(c.code)} ${esc(c.name)}</option>`).join("")}</optgroup>`).join("")}</select>
+        <button class="ghost small" id="k-prev" aria-label="Ankstesni metai">◀</button><b class="mono">${year}</b><button class="ghost small" id="k-next" aria-label="Kiti metai">▶</button></div></div>
+    ${planTabs("k")}
+    <div class="card"><div class="row between"><h2>${esc(r.name)}</h2><span class="muted">${year} m.: <b>${r.totals.work_days}</b> darbo d. · <b>${r.totals.hours}</b> val.</span></div>
+      <div class="row calbar">
+        <label>Pamainos ${edit ? `<select id="k-pat">${scope !== "factory" ? `<option value="">Paveldėti (${esc(r.own_pattern ? "" : r.pattern ? r.pattern.name : "—")})</option>` : ""}
+          ${pats.map(p => `<option value="${p.id}" ${p.id === r.own_pattern ? "selected" : ""}>${esc(p.name)} · ${p.week_hours} val./sav.</option>`).join("")}</select>`
+          : `<b>${esc(r.pattern ? r.pattern.name : "—")}</b>`}</label>
+        <span class="muted small">${r.pattern ? `${r.pattern_src !== scope ? `paveldėta iš ${srcLabel} kalendoriaus · ` : ""}${esc(weekText(r.pattern.week))}` : ""}</span>
+        ${edit ? `<button class="ghost small" id="k-pats">Pamainų šablonai…</button>` : ""}</div>
+      <div class="calleg muted small">${["darbo", "poilsio", "svente", "nedarbo", "remontas", "papildomas", "kitas"].map(k => `<span><i class="cday k-${k}"></i>${CAL_KIND[k]}</span>`).join("")}
+        <span><i class="cday k-darbo own"></i>šio kalendoriaus išimtis</span><span><i class="cday k-nedarbo inh"></i>paveldėta</span></div>
+      <p class="muted small">${edit ? "Spustelėkite dieną arba pele pažymėkite kelias – nurodysite nedarbo dieną, remontą, papildomą darbą ar kitą laiką. " : ""}Centras paveldi baro ir gamyklos kalendorių (šventės, uždarymai), baras – gamyklos.</p>
+      <div class="yrcal" id="k-year">${MONTHS.map((_, m) => month(m)).join("")}</div></div>
+    <div class="card"><h2>Išimtys ${year} m.</h2>
+      <div class="tbl"><table><thead><tr><th>Kada</th><th>Kur</th><th>Rūšis</th><th>Laikas</th><th>Pastaba</th><th></th></tr></thead><tbody>
+      ${r.exceptions.map(e => `<tr><td class="num">${e.from}${e.to !== e.from ? ` – ${e.to} <span class="muted">(${e.days} d.)</span>` : ""}</td>
+        <td>${e.own ? esc(e.where) : `<a href="#/planas/kalendorius/${e.level[0]}/${e.level[1]}">${esc(e.where)}</a>`}</td>
+        <td><i class="cday k-${e.kind}"></i> ${esc(e.label)}</td><td class="mono">${esc(e.hours || (e.kind === "remontas" ? "visa diena" : ""))}</td><td>${esc(e.note)}</td>
+        <td>${edit && e.own ? `<button class="small ghost" data-rm="${e.from}|${e.to}">Pašalinti</button>` : e.own ? "" : '<span class="muted small">paveldėta</span>'}</td></tr>`).join("")
+        || `<tr><td colspan="6" class="muted">Išimčių nėra – dirbama pagal pamainų šabloną, išskyrus šventes.</td></tr>`}</tbody></table></div>
+      <details><summary class="muted">Valstybinės šventės (${r.holidays.length})</summary><ul class="small">${r.holidays.map(h => `<li><span class="mono">${h.date}</span> ${esc(h.name)}</li>`).join("")}</ul></details></div>`;
+    $("#k-scope").value = `${scope}:${id}`;
+    $("#k-scope").onchange = e => { const [s, i] = e.target.value.split(":"); location.hash = s === "factory" ? "#/planas/kalendorius" : `#/planas/kalendorius/${s}/${i}`; };
+    $("#k-prev").onclick = () => { year--; S.calYear = year; draw(); };
+    $("#k-next").onclick = () => { year++; S.calYear = year; draw(); };
+    if (!edit) return;
+    $("#k-pat").onchange = async e => calSaved(await act(() => PUT("/api/calendar/pattern", { scope, scope_id: id, pattern_id: e.target.value ? +e.target.value : null })), draw);
+    $("#k-pats").onclick = () => patternsModal(pats, draw);
+    $$("[data-rm]").forEach(b => b.onclick = async () => {
+      const [a, z] = b.dataset.rm.split("|");
+      calSaved(await act(() => POST("/api/calendar/days", { scope, scope_id: id, from: a, to: z, kind: "iprasta" })), draw);
+    });
+    // pele – tempiant pažymimos kelios dienos; pirštu ar klaviatūra – viena (intervalą galima pakeisti lange)
+    const grid = $("#k-year"); let sel = null, byMouse = 0;
+    const mark = () => $$(".cday[data-d]", grid).forEach(c => c.classList.toggle("sel", !!sel && c.dataset.d >= sel[0] && c.dataset.d <= sel[1]));
+    grid.onpointerdown = ev => {
+      const c = ev.target.closest(".cday[data-d]"); if (!c || ev.pointerType !== "mouse" || ev.button) return;
+      ev.preventDefault(); const a = c.dataset.d; sel = [a, a]; mark();
+      grid.onpointerover = m => { const o = m.target.closest(".cday[data-d]"); if (o) { sel = [a, o.dataset.d].sort(); mark(); } };
+      document.addEventListener("pointerup", () => {
+        grid.onpointerover = null; const s = sel; sel = null; mark(); byMouse = Date.now(); dayModal(r, s[0], s[1], draw);
+      }, { once: true });
+    };
+    grid.onclick = ev => {
+      const c = ev.target.closest(".cday[data-d]");
+      if (c && Date.now() - byMouse > 400) dayModal(r, c.dataset.d, c.dataset.d, draw);
+    };
+  };
+  await draw();
+}
+
+function dayModal(r, a, z, after) {
+  const x = r.days.find(d => d.date === a) || {};
+  // poilsio dienai ar šventei dažniausiai žymimas papildomas darbas, darbo dienai – nedarbo
+  const pre = a === z && x.own ? x.kind : x.minutes ? "nedarbo" : "papildomas";
+  const def = r.pattern ? (r.pattern.week.find(Boolean) || "07:00-15:30") : "07:00-15:30";
+  const kinds = [["iprasta", "Įprasta – pašalinti išimtį"], ...Object.entries(r.kinds)];
+  modal(`<h2>${esc(r.name)}: dienos</h2>
+    <p class="muted small">${esc(calTip(x).split("\n")[0])}</p>
+    <div class="row"><label>Nuo<input type="date" id="cd-a" value="${a}"></label><label>Iki<input type="date" id="cd-b" value="${z}"></label></div>
+    <div class="ckinds">${kinds.map(([k, l]) => `<label class="row" style="display:flex"><input type="radio" name="cd-k" value="${k}" ${k === pre ? "checked" : ""}><i class="cday k-${k === "iprasta" ? "darbo" : k}"></i>${esc(l)}</label>`).join("")}</div>
+    <label id="cd-hl">Laikas<input id="cd-h" placeholder="pvz. 07:00-15:30" value="${esc(a === z && x.own && x.kind !== "nedarbo" ? x.hours : "")}" autocomplete="off"></label>
+    <p class="muted small" id="cd-hint"></p>
+    <label>Pastaba<input id="cd-n" value="${esc(a === z && x.own ? x.note : "")}" placeholder="pvz. lazerio servisas, kolektyvinės atostogos"></label>
+    <label class="row" style="display:flex"><input type="checkbox" id="cd-w"> tik darbo dienoms (praleisti savaitgalius ir šventes)</label>
+    <div class="row"><button id="cd-ok">Įrašyti</button><button class="ghost" id="cd-x">Atšaukti</button></div>`, box => {
+    const k = () => $("input[name=cd-k]:checked", box).value;
+    const upd = () => {
+      const v = k();
+      $("#cd-hl").hidden = v === "iprasta" || v === "nedarbo";
+      $("#cd-hint").textContent = { remontas: "Tuščia – visa diena. Su laiku – centras nedirba tik tuo metu (pvz. 07:00-11:00).",
+        papildomas: "Pridedama prie įprasto darbo laiko: šeštadienio pamaina ar viršvalandžiai (pvz. 15:30-19:30).",
+        kitas: "Pakeičia dienos laiką, pvz. sutrumpinta diena ar darbas šventės dieną.", nedarbo: "Tą dieną nedirbama: gamyklos uždarymas, kolektyvinės atostogos.",
+        iprasta: "Išimtis pašalinama – dirbama pagal pamainų šabloną (šventės lieka)." }[v];
+      if ((v === "papildomas" || v === "kitas") && !$("#cd-h").value) $("#cd-h").value = v === "papildomas" ? "07:00-13:00" : def;
+    };
+    $$("input[name=cd-k]", box).forEach(i => i.onchange = upd); upd();
+    $("#cd-x").onclick = closeModal;
+    $("#cd-ok").onclick = async () => {
+      const v = k();
+      const res = await act(() => POST("/api/calendar/days", { scope: r.scope, scope_id: r.scope_id, from: $("#cd-a").value, to: $("#cd-b").value || $("#cd-a").value,
+        kind: v, hours: v === "nedarbo" || v === "iprasta" ? "" : $("#cd-h").value, note: $("#cd-n").value, workdays_only: $("#cd-w").checked }));
+      calSaved(res, after);
+    };
+  });
+}
+
+// po kalendoriaus pakeitimo – kas paveikta (operacijos vėliau, apkrova) ir kam pranešta
+function calSaved(r, after) {
+  closeModal(); after && after();
+  if (!r) return;
+  const n = r.affected.length;
+  if (!n && !r.freed.length) { toast(`${r.summary}${r.days !== undefined ? ` · ${r.days} d.` : ""} – kitų darbų nepaveikė`); return; }
+  modal(`<h2>Kalendorius pakeistas</h2><p><b>${esc(r.summary)}</b></p>
+    ${n ? `<div><b>Paveikti projektai (${n})</b> <span class="muted small">– jų vadovams, atsakingiesiems ir planuotojams išsiųstas pranešimas</span>
+      <div class="aff">${r.affected.map(a => `<div class="affrow ${a.severity}"><div><span class="sev ${a.severity}">${esc(SEV_LABEL[a.severity])}</span> <b class="mono">${esc(a.code)}</b> ${esc(a.name)}</div>
+        <ul>${a.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div></div>` : ""}
+    ${r.freed.length ? `<div><b>Pagerėjo</b><ul class="muted small">${r.freed.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
+    <div><button id="cs-x">Gerai</button></div>`, () => { $("#cs-x").onclick = closeModal; });
+}
+
+function patternsModal(pats, after) {
+  const form = p => `<form id="pt-f" class="ptform"><input type="hidden" name="id" value="${p ? p.id : ""}">
+    <label>Pavadinimas<input name="name" required value="${esc(p ? p.name : "")}"></label>
+    ${WD.map((w, i) => `<label class="row" style="display:flex"><span class="mono" style="width:24px">${w}</span><input name="w${i}" value="${esc(p ? p.week[i] : i < 5 ? "07:00-11:00, 11:30-15:30" : "")}" placeholder="nedirbama" autocomplete="off"></label>`).join("")}
+    <p class="muted small">Kelios dalys – per kablelį (pertrauka – tarpas tarp jų). Vietinis laikas. Naktinė pamaina – dviem dalimis: 22:00-24:00 ir kitą dieną 00:00-06:00.</p>
+    <div class="row"><button>${p ? "Įrašyti" : "Sukurti"}</button><button type="button" class="ghost" id="pt-back">Atgal</button></div></form>`;
+  const list = () => modal(`<h2>Pamainų šablonai</h2>
+    <div class="tbl"><table><thead><tr><th>Šablonas</th><th>Val./sav.</th><th>Naudoja</th><th></th></tr></thead><tbody>
+    ${pats.map(p => `<tr><td><b>${esc(p.name)}</b><div class="muted small">${esc(weekText(p.week))}</div></td>
+      <td class="num">${p.week_hours}</td><td class="small">${p.factory ? "<b>gamykla</b> " : ""}${esc(p.used_by.join(", "))}</td>
+      <td><button class="small ghost" data-pe="${p.id}">Keisti</button></td></tr>`).join("")}</tbody></table></div>
+    <div class="row"><button id="pt-new">+ Naujas šablonas</button><button class="ghost" id="pt-x">Uždaryti</button></div>`, () => {
+    $("#pt-x").onclick = closeModal;
+    $("#pt-new").onclick = () => edit(null);
+    $$("[data-pe]").forEach(b => b.onclick = () => edit(pats.find(p => p.id === +b.dataset.pe)));
+  });
+  const edit = p => modal(`<h2>${p ? `Šablonas „${esc(p.name)}“` : "Naujas pamainų šablonas"}</h2>
+    ${p && (p.factory || p.used_by.length) ? `<p class="warn">Šabloną naudoja ${p.factory ? "gamykla" : ""}${p.factory && p.used_by.length ? ", " : ""}${esc(p.used_by.join(", "))} – pakeitimas paveiks jų prognozę ir apkrovą.</p>` : ""}
+    ${form(p)}`, box => {
+    $("#pt-back").onclick = list;
+    $("#pt-f").onsubmit = async e => {
+      e.preventDefault();
+      const f = formData(e.target), body = { name: f.name, week: WD.map((_, i) => f[`w${i}`]) };
+      const r = await act(() => p ? PUT(`/api/calendar/patterns/${p.id}`, body) : POST("/api/calendar/patterns", body));
+      if (!r) return;
+      if (p) calSaved(r, after); else { closeModal(); toast("Šablonas sukurtas – priskirkite jį gamyklai, barui ar centrui"); after(); }
+    };
+  });
+  list();
+}
+
+// prognozė: kada operacija prasidės ir baigsis pagal eilę, normas ir kalendorių
+function fcCell(f) {
+  if (!f) return '<span class="muted">—</span>';
+  if (f.no_time) return '<span class="lock">centras nedirba – laiko nėra</span>';
+  return `<span class="fcst ${f.late ? "late" : ""}" title="${esc(`Pradžia ${dt(f.start)}, pabaiga ${dt(f.end)}${f.due ? `\nEtapo terminas ${f.due}` : ""}${f.wait ? `\nLaukia: ${f.wait}` : ""}${f.norm ? "" : "\nBe normos – trukmė nežinoma"}`)}">
+    <span class="nw">${dt(f.start)} → <b>${dt(f.end)}</b></span>${f.late ? `<span class="s-late small"> · nespės iki ${esc(f.due)}</span>` : ""}
+    ${f.wait ? `<div class="muted small">po ${esc(f.wait)}</div>` : ""}${f.pending ? `<div class="muted small">jei paleista dabar – ${esc(f.pending)}</div>` : ""}${f.loop ? `<div class="lock">eilė prieštarauja maršrutui</div>` : ""}${f.norm ? "" : `<div class="muted small">be normos</div>`}</span>`;
+}
+
 // ---------- pranešimai (varpelis) ----------
 const SEV_LABEL = { red: "Kritiška", yellow: "Dėmesio", info: "Informacija", good: "Pagerėjo" };
 const KIND_LABEL = { phase: "Etapo datos", priority: "Prioritetas", queue: "Centro eilė", activate: "Naujas projektas",
-  shop_delay: "Vėlavimas ceche", component_delay: "Komponentai" };
+  shop_delay: "Vėlavimas ceche", component_delay: "Komponentai", calendar: "Darbo kalendorius" };
 async function bellCount() {
   if (!S.me) return;
   try {
@@ -1030,11 +1219,12 @@ async function pagePlanner() {
       ${r.departments.filter(d => d.bars.length || d.load.some(c => c.hours)).map(d => `<div class="grow">
         <div class="glab"><b>${esc(d.name)}</b><span class="muted small">${d.capacity_week} val./sav.</span></div>
         <div class="gtime">
+          ${d.off.map(o => `<i class="goff k-${o.kind} ${o.off ? "" : "part"}" style="left:${x(o.d)}%;width:${100 / total}%" title="${esc(o.d + " · " + o.text)}"></i>`).join("")}
           <div class="gload">${d.load.map((c, i) => `<span class="${utilCls(c.util)}" style="left:${i / weeks * 100}%;width:${100 / weeks}%" title="${esc(r.weeks[i].label)}: ${c.hours} val. iš ${d.capacity_week}${c.shortage ? ` – trūksta ${c.shortage} val.` : ""}">${c.util ? Math.round(c.util * 100) + "%" : ""}</span>`).join("")}</div>
           ${lanes(d.bars).map(l => `<div class="glane">${l.map(bar).join("")}</div>`).join("")}
           <i class="gtoday" style="left:${today}%"></i></div></div>`).join("")}
     </div></div>
-    <p class="muted small">Juostos – etapų planas departamentuose (gamybos baruose – pagal operacijas). Viršuje – savaitės apkrova. Raudonas kraštas – vėluoja, brūkšniuota – krepšelio projektas. Tempkite juostą arba jos dešinį kraštą; spustelėję – keisti datas.</p></div>
+    <p class="muted small">Juostos – etapų planas departamentuose (gamybos baruose – pagal operacijas). Viršuje – savaitės apkrova. Raudonas kraštas – vėluoja, brūkšniuota – krepšelio projektas. Fone – <a href="#/planas/kalendorius">darbo kalendorius</a>: pilka – nedirbama, raudona – šventė ar uždaryta, žalia – papildomas darbas, ochra – remontas. Tempkite juostą arba jos dešinį kraštą; spustelėję – keisti datas.</p></div>
     <div class="card"><h2>Pokyčių signalai</h2>${changesList(ch)}</div>`;
     $("#g-b").onchange = e => { basket = e.target.checked; try { localStorage.setItem("pf.gb", basket ? "1" : "0"); } catch {} draw(); };
     $("#g-w").onchange = e => { weeks = +e.target.value; try { localStorage.setItem("pf.gw", weeks); } catch {} draw(); };
@@ -1127,12 +1317,14 @@ async function pageTerminal(code) {
   let data, scanFocus = false;   // skaitytuvas veikia kaip klaviatūra – fokusas išlieka po atnaujinimo
   const draw = async () => {
     data = await GET(`/api/terminal/${code}`);
+    S.termCal = data.calendar;
     const run = data.running;
     const first = data.queue.findIndex(t => !t.lock);
     app().innerHTML = `<div class="tm">
       <div class="row between"><h1><span class="mono">${esc(data.centre.code)}</span> ${esc(data.centre.name)}</h1>
         <div class="row"><input id="scan" class="scan" placeholder="▦ Skenuokite maršruto lapą" autocomplete="off" aria-label="Maršruto lapo QR">
           <span class="muted">${esc(S.me.name)}</span>${centres.length > 1 ? `<button class="ghost" id="chg">Kitas centras</button>` : ""}</div></div>
+      ${data.calendar && !data.calendar.working ? `<div class="offc big-off">⏾ ${esc(data.calendar.why)}${data.calendar.next ? ` · darbo laikas nuo ${dt(data.calendar.next)}` : ""}</div>` : ""}
       ${run ? runCard(run) : `<div class="card"><h2>Šiuo metu niekas nevykdoma</h2><p class="muted">${first >= 0 ? "Pradėkite pažymėtą užduotį eilėje." : data.queue.length ? "Visos eilės užduotys šiuo metu užrakintos – priežastys nurodytos prie kiekvienos." : "Patvirtintoje eilėje užduočių nėra."}</p></div>`}
       <div class="card"><h2>Eilė</h2>${data.queue.map((t, i) => `
         <div class="q ${!run && i === first ? "next" : ""}" data-q="${t.id}">
@@ -1154,7 +1346,12 @@ async function pageTerminal(code) {
     if (scanFocus) scan.focus();
     scan.onfocus = () => (scanFocus = true); scan.onblur = () => (scanFocus = false);
     scan.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); onScan(scan.value.trim(), data); scan.value = ""; } };
-    $$("[data-start]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/terminal/${b.dataset.start}/start`), "Pradėta"); draw(); });
+    // ne darbo laikas – tik paklausiama: viršvalandžius ar skubų darbą leidžia meistras
+    $$("[data-start]").forEach(b => b.onclick = async () => {
+      const c = data.calendar;
+      if (c && !c.working && !confirm(`Dabar ne darbo laikas: ${c.why}.\nAr tikrai pradėti darbą?`)) return;
+      await act(() => POST(`/api/terminal/${b.dataset.start}/start`), "Pradėta"); draw();
+    });
     $$("[data-ack]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/tasks/${b.dataset.ack}/ack_revision`), "Revizija patvirtinta"); draw(); });
     $$("[data-ackf]").forEach(b => b.onclick = async () => { await act(() => POST(`/api/tasks/${b.dataset.ackf}/ack_files`), "Failas patvirtintas"); draw(); });
     if (run) wireRun(run, draw);
@@ -1203,7 +1400,11 @@ function wireRun(t, redraw) {
     });
   };
   const rs = $("#b-resume");
-  if (rs) rs.onclick = async () => { await act(() => POST(`/api/terminal/${t.id}/resume`)); redraw(); };
+  if (rs) rs.onclick = async () => {
+    const c = S.termCal;
+    if (c && !c.working && !confirm(`Dabar ne darbo laikas: ${c.why}.\nAr tikrai tęsti darbą?`)) return;
+    await act(() => POST(`/api/terminal/${t.id}/resume`)); redraw();
+  };
   $("#b-stop").onclick = () => {
     const left = Math.max(0, t.qty_plan - t.qty_good - t.qty_scrap);
     modal(`<h2>Baigti darbą</h2><p class="muted">${esc(t.name)} · liko ${left} iš ${t.qty_plan} vnt.</p>

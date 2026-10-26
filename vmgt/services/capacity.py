@@ -17,7 +17,12 @@ naudojamos tik tol, kol jo apimtyje nėra nė vienos cecho operacijos: kai
 technologas sudaro maršrutą, tikslios normos pakeičia įvertį.
 
 Pajėgumas = žmonės × valandos per savaitę × prieinamumas (dalis laiko,
-kuri lieka projektams po atostogų, ligų ir kitų darbų).
+kuri lieka projektams po atostogų, ligų ir kitų darbų) × savaitės
+kalendoriaus santykis (`workcal`): kiek darbo valandų tą savaitę iš tikrųjų
+yra prieš tai, kiek numato pamainų šablonas. Šventė, gamyklos uždarymas,
+centro remontas savaitę sumažina, papildoma pamaina – padidina. Barui
+santykis skaičiuojamas iš jo centrų (vieno iš 10 suvirinimo postų remontas –
+−10 %), biuro skyriui – iš gamyklos kalendoriaus.
 
 Krepšelio (dar nepradėti) projektai skaičiuojami ATSKIRAI – iš to ir
 matosi, ką reikštų juos priimti.
@@ -29,7 +34,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from .. import db
-from . import NotFound, RuleError
+from . import NotFound, RuleError, workcal
 from .tasks import CENTRE_PHASE
 
 PRODUCTION_KINDS = ("gamyba", "surinkimas")
@@ -92,17 +97,21 @@ def monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def workdays(a: date, b: date) -> list[date]:
-    """Darbo dienos [a, b] imtinai."""
+def _weekday(d: date) -> bool:
+    return d.weekday() < 5
+
+
+def workdays(a: date, b: date, is_work=_weekday) -> list[date]:
+    """Darbo dienos [a, b] imtinai (pagal kalendorių, jei duotas `is_work`)."""
     out, x = [], a
     while x <= b:
-        if x.weekday() < 5:
+        if is_work(x):
             out.append(x)
         x += timedelta(days=1)
     return out
 
 
-def spread(hours: float, start: date, end: date, today: date, status: str) -> tuple[dict, str | None]:
+def spread(hours: float, start: date, end: date, today: date, status: str, is_work=_weekday) -> tuple[dict, str | None]:
     """Paskirsto valandas savaitėms. Grąžina ({savaitės pirmadienis: val.}, pastaba).
 
     - nepradėtas etapas, kurio pradžia praėjo, pasislenka į šiandien (darbas
@@ -114,20 +123,21 @@ def spread(hours: float, start: date, end: date, today: date, status: str) -> tu
     """
     if not hours or not start or not end or end < start:
         return {}, "be datų"
-    days = workdays(start, end) or [start]
+    days = workdays(start, end, is_work) or [start]
     rate = hours / len(days)
     note = None
     if status == "planuota" and start < today:
         # tiek pat DARBO dienų nuo šiandien: perkėlus kalendorinėmis dienomis
         # savaitgalis „suvalgytų“ dalį valandų
         n, x, days = len(days), today, []
-        while len(days) < n:
-            if x.weekday() < 5:
+        while len(days) < n and (x - today).days < workcal.MAX_DAYS:
+            if is_work(x):
                 days.append(x)
             x += timedelta(days=1)
+        days = days or [today]
         note = "pradžia pasislinko"
     elif end < today:
-        wk = workdays(today, today + timedelta(days=6))[:5]
+        wk = workdays(today, today + timedelta(days=6), is_work)[:5] or [today]
         days = wk
         rate = min(hours, rate * len(wk)) / len(wk)
         note = "vėluoja – tempas tęsiamas savaitę"
@@ -161,6 +171,13 @@ def report(con, weeks: int = 12, include_basket: bool = True, start: date | None
         for k in d["phase_kind_list"]:
             by_kind.setdefault(k, d["id"])
     by_area = {d["area_id"]: d["id"] for d in depts if d["kind"] == "production" and d["area_id"]}
+    cal = workcal.Calendar(con)
+    scope_of = {d["id"]: ("area", d["area_id"]) if d["kind"] == "production" and d["area_id"] else ("factory", 0)
+                for d in depts}
+
+    def work_fn(dept_id):
+        sc = scope_of.get(dept_id, ("factory", 0))
+        return lambda x: cal.is_work(*sc, x)
 
     projects = {p["id"]: p for p in db.rows(con.execute(
         "SELECT id, code, name, status, due_date, priority FROM projects WHERE status IN ('vykdomas','krepselis')"))}
@@ -198,7 +215,7 @@ def report(con, weeks: int = 12, include_basket: bool = True, start: date | None
             unassigned.append({"project": p["code"], "project_id": p["id"], "phase_id": ph["id"], "what": name,
                                "why": "nenurodytas departamentas (barui – kuriame bus gaminama)"})
             continue
-        wh, note = spread(ph["hours"], _d(ph["plan_start"]), _d(ph["plan_end"]), today, ph["status"])
+        wh, note = spread(ph["hours"], _d(ph["plan_start"]), _d(ph["plan_end"]), today, ph["status"], work_fn(dept))
         if note and note != "be datų":
             notes.append(f"{name}: {note}")
         if note == "be datų":
@@ -230,7 +247,7 @@ def report(con, weeks: int = 12, include_basket: bool = True, start: date | None
         a, b = (_d(ph["plan_start"]), _d(ph["plan_end"])) if ph else (None, None)
         if a and b and b >= today:
             # likęs darbas – per likusias etapo dienas (ne anksčiau nei šiandien)
-            wh, _ = spread(hours, max(a, today), b, today, "vykdoma")
+            wh, _ = spread(hours, max(a, today), b, today, "vykdoma", work_fn(dept))
         else:
             # etapo nėra arba jis jau turėjo baigtis – likutis vis tiek padaromas, šią savaitę
             wh = {monday(today): hours}
@@ -239,16 +256,18 @@ def report(con, weeks: int = 12, include_basket: bool = True, start: date | None
     # ---------- suvestinė ----------
     rows, shortages = [], []
     for d in depts:
-        cap = capacity_week(d)
+        cap0 = capacity_week(d)
         cells = []
         for w in week_list:
+            factor, cal_notes = week_factor(cal, *scope_of[d["id"]], w)
+            cap = cap0 * factor
             per = load[d["id"]].get(w, {})
             committed = sum(h for pid, h in per.items() if projects[pid]["status"] == "vykdomas")
             basket = sum(h for pid, h in per.items() if projects[pid]["status"] == "krepselis")
             total = committed + (basket if include_basket else 0)
             util = total / cap if cap else (None if not total else float("inf"))
             cell = {"week": w.isoformat(), "committed": round(committed, 1), "basket": round(basket, 1),
-                    "capacity": round(cap, 1), "util": round(util, 3) if util not in (None, float("inf")) else util,
+                    "capacity": round(cap, 1), "factor": round(factor, 3), "calendar": cal_notes, "util": round(util, 3) if util not in (None, float("inf")) else util,
                     "shortage": round(max(0.0, total - cap), 1),
                     "projects": sorted(({"project_id": pid, "code": projects[pid]["code"], "hours": round(h, 1),
                                          "basket": projects[pid]["status"] == "krepselis"}
@@ -267,7 +286,7 @@ def report(con, weeks: int = 12, include_basket: bool = True, start: date | None
         peak = max((c["util"] for c in cells if isinstance(c["util"], (int, float))), default=0)
         rows.append({**{k: d[k] for k in ("id", "code", "name", "kind", "headcount", "hours_per_week", "availability",
                                            "area_name")},
-                     "capacity_week": round(cap, 1), "cells": cells, "peak_util": peak,
+                     "capacity_week": round(cap0, 1), "cells": cells, "peak_util": peak,
                      "free_hours": round(free, 1),
                      "basket_hours": round(sum(c["basket"] for c in cells), 1),
                      "later_hours": round(sum(later.values()), 1)})
@@ -305,6 +324,34 @@ def report(con, weeks: int = 12, include_basket: bool = True, start: date | None
             "unassigned": unassigned, "notes": sorted(set(notes)),
             "projects_active": len(active), "projects_basket": len(basket), "basket_fit": fit,
             "thresholds": {"warn": WARN_UTIL, "over": OVER_UTIL}}
+
+
+def week_factor(cal: workcal.Calendar, scope, sid, week: date) -> tuple[float, list[str]]:
+    """Savaitės darbo valandos pagal kalendorių prieš šablono numatytas: 1.0 –
+    įprasta savaitė. Barui – jo centrų suma (vieno centro remontas mažina
+    dalimi), biurui – gamyklos. Ir kas tą savaitę neįprasta – paaiškinimui."""
+    if scope == "area":
+        units = [("centre", c["id"]) for c in cal.centres.values() if c["area_id"] == sid and c["active"]] \
+            or [("area", sid)]
+    else:
+        units = [("factory", 0)]
+    real = norm = 0
+    notes = []
+    for i in range(7):
+        x = week + timedelta(days=i)
+        lvl = cal.day(scope, sid, x)
+        # šventė sekmadienį darbo laiko nekeičia – neminima
+        if lvl["kind"] not in ("darbo", "poilsio") and lvl["minutes"] != cal.normal_minutes(scope, sid, x):
+            notes.append(f"{x.strftime('%m-%d')} {lvl['label']}{': ' + lvl['note'] if lvl['note'] else ''}")
+        for u in units:
+            day = cal.day(*u, x)
+            real += day["minutes"]
+            norm += cal.normal_minutes(*u, x)
+            if u[0] == "centre" and day["own"]:
+                notes.append(f"{x.strftime('%m-%d')} {cal.centres[u[1]]['code']}: {day['label'].lower()}"
+                              f"{' ' + day['hours'] if day['hours'] and day['kind'] != 'remontas' else ''}"
+                              f"{' – ' + day['note'] if day['note'] else ''}")
+    return (real / norm if norm else 1.0), notes
 
 
 def _d(s):

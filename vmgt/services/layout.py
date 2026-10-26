@@ -88,7 +88,7 @@ def plan(con, project_id=None) -> dict:
             t = st.get("task")
             c.update({"state": st.get("state", "tuscia"), "queue": st.get("queue", 0), "since": st.get("since"),
                       "work_s": st.get("work_s", 0), "who": st.get("who"), "pause": st.get("pause"),
-                      "lock": st.get("lock"),
+                      "lock": st.get("lock"), "calendar": st.get("calendar"),
                       "task": {k: t[k] for k in ("id", "name", "project_code", "assembly_code", "qty_plan", "qty_good",
                                                  "norm_min", "project_id")} if t else None,
                       "next": {k: st["next"][k] for k in ("name", "project_code", "assembly_code")} if st.get("next") else None,

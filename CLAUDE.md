@@ -80,6 +80,8 @@ pagrindiniai pavyzdžiai. Testai (`sample_client`) – be demo; `test_demo.py` �
 | `services/actions.py` | Projekto komandos užduotys: statusai, leistini perėjimai, istorija |
 | `services/meetings.py` | Susitikimų protokolai (MoM): veiksmai → užduotys, patvirtinimas |
 | `services/health.py` | Projekto sveikata realiu laiku: 4 sritys, lygiai, priežastys |
+| `services/workcal.py` | Darbo kalendorius: pamainų šablonai, LT šventės, išimtys gamykla → baras → centras, darbo laiko skaičiavimas (UTC ↔ vietinis) |
+| `services/forecast.py` | Operacijų prognozė: pradžia ir pabaiga pagal centrų eiles, normas, srautą ir kalendorių |
 | `services/capacity.py` | Resursų apkrova: departamentų poreikis prieš pajėgumą savaitėmis, trūkumai, krepšelio projektų tilpimas |
 | `services/planner.py` | Planuotojo Gantt pagal departamentus, pakeitimų poveikis (SAVEPOINT + apkrovos palyginimas), įrašymas |
 | `services/signals.py` | Pokyčių signalai ir pranešimai: planuotojo pakeitimai, vėlavimai ceche, komponentai, nauji projektai |
@@ -202,6 +204,30 @@ kiti EXC2), patikros laukiančioms operacijoms; P-24108 dažytas rėmas
 **sulaikytas** kokybės eilėje (dangos storis). Demo NCR – su 8D.
 `test_kokybe.py`.
 
+## Darbo kalendorius (nuo 2026-10-26)
+
+Vartotojo sprendimai: lygiai **gamykla → baras → centras**; žymima **pamainos,
+šventės ir nedarbo dienos, remontai, papildomas darbas**; veikia **apkrovą,
+operacijų prognozę, cechą ir terminalą, planuotojo Gantt**; redaguojama
+**metiniame kalendoriuje**. Langas – „Planas“ skirtukas „Darbo kalendorius“
+(`#/planas/kalendorius[/area|centre/<id>]`), keisti – teisė `calendar`
+(admin, vadovas, planuotojas, meistras). Migracija 13.
+
+| | |
+|---|---|
+| šablonai | `shift_patterns` (savaitė: dienai „07:00-11:00, 11:30-15:30“, tarpas – pertrauka). Gamyklos – `settings.factory_pattern`, baro / centro – `shift_pattern_id` (NULL – paveldėti). Numatyti: „1 pamaina“ (8 val.), „2 pamainos“ (16 val.). Laikas – **vietinis**: pamaina nesikeičia keičiantis vasaros laikui; poslinkis – ES taisyklė (`utc_offset`), ne `zoneinfo` (Windows be `tzdata`) |
+| diena | šablonas → LT valstybinė šventė (`holidays`, Velykos skaičiuojamos) → išimtys gamyklos, baro, centro eile (`calendar_days`): nedarbo – nieko, remontas – atima (be laiko – visą dieną, pastaba privaloma), papildomas – prideda, kitas – pakeičia. Tad šventę galima paversti darbo diena, o centro remontas kitų baro centrų nepaliečia |
+| laikas | `Calendar.add_work` – kada bus atlikta N sek. darbo tik darbo langais; `status` – ar dabar darbo laikas, kodėl ne, kada prasidės |
+| prognozė | `forecast.forecast`: centro eilės tvarka, vykdomos likutis (norma × planas − dirbta, bet ≥ 15 % likusių vnt.), laukia ankstesnės srauto operacijos (jei ji nieko neperdavė) ir `requires` mazgų – tos pačios taisyklės kaip `block_reason`; kartojama, kol nebesikeičia (prieštaraujanti eilė – „loop“). Vėluoja – pabaiga po etapo (mazgo ar projekto) plano pabaigos. Neišleista / nepatvirtinta – „jei paleista dabar“. Rodoma centro eilėje ir projekto „Gamyba“. Supaprastinimai: eilė laikoma griežta, KK laukimas ir derinimas neprognozuojami |
+| apkrova | savaitės pajėgumas × `week_factor` = kalendoriaus valandos / šablono valandos (barui – jo centrų suma: 1 iš 10 postų remontas – −10 %; biurui – gamyklos); etapų valandos paskirstomos tik kalendoriaus darbo dienomis; langelyje – kas tą savaitę neįprasta |
+| Gantt | `planner._off_days`: fone nedarbo (pilka), šventė / uždaryta (raudona), papildomas (žalia), remontas (ochra, ir centrų) |
+| ceche | `analytics.floor` ir planas – `calendar`: ne darbo metu laisvas centras blankus „⏾ šventė / remontas / po pamainos“; terminale juosta ir **Start / Tęsti paklausia** (įspėjimas, ne draudimas – viršvalandžius sprendžia meistras) |
+| signalai | `planner.calendar_change`: prieš ir po – apkrova (`_compare`) ir prognozė (operacija baigsis ≥ 1 val. vėliau; raudona – nebespės iki etapo pabaigos); `plan_changes` rūšis `calendar`, pranešimai paveiktiems, langas „Kalendorius pakeistas“ |
+
+Pavyzdžiai (`seed._calendar`): MAB – 2 pamainos, LAZ-01 servisas artimiausią
+trečiadienį, DAZ-02 krosnies valymas 07–11, SVB šeštadienio viršvalandžiai,
+gamykla uždaryta 12-28…12-31. `test_kalendorius.py`.
+
 ## Planavimas ir pokyčių signalai (nuo 2026-10-26)
 
 Vartotojo prašymas: planuotojo lange matyti visų departamentų užduotis, o
@@ -256,7 +282,7 @@ ir gamybos barai**; poreikis – **etapų planuojamos valandos + cecho normos**;
 | | |
 |---|---|
 | departamentai | `departments` (migracija 6): biuro skyrius – `phase_kinds` (kurių etapų darbas: projektavimas, technologija, komponentai, programavimas, testavimas); gamybos baras – `area_id` |
-| pajėgumas | žmonės × val. per savaitę × prieinamumas (numatyta 85 % – atostogos, ligos, kiti darbai); keičiama lange (teisė `projects`) |
+| pajėgumas | žmonės × val. per savaitę × prieinamumas (numatyta 85 % – atostogos, ligos, kiti darbai) × savaitės kalendoriaus santykis (žr. „Darbo kalendorius“); keičiama lange (teisė `projects`) |
 | biuro poreikis | etapo `hours` tolygiai per etapo darbo dienas (`spread`); etapas gali turėti `department_id`, kitaip – pagal `phase_kinds` |
 | gamybos poreikis | likusios cecho operacijų normos (norma × likęs kiekis) per mazgo gamybos / surinkimo etapo likusias dienas; etapas praėjęs ar jo nėra – likutis į šią savaitę. Kol etapo apimtyje NĖRA operacijų – etapo `hours` su nurodytu baru (įvertis krepšelio projektui); atsiradus operacijoms įvertis nebeskaičiuojamas (dvigubai negali) |
 | prielaidos | nepradėtas etapas, kurio pradžia praėjo, perkeliamas į šiandien tiek pat DARBO dienų; vykdomo etapo praeitis laikoma atlikta; vėluojančio vykdomo – tempas tęsiamas savaitę (kad vėlavimas nedingtų); savaitgalį grafikas prasideda nuo kitos savaitės |

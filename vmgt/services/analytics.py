@@ -23,9 +23,12 @@ def floor(con) -> list[dict]:
     """Kiekvienas darbo centras: dirba / pristabdyta / gali pradėti / laukia / nėra darbų."""
     out = []
     from .projects import list_centres
+    from .workcal import centre_status
 
+    cal = centre_status(con)
     for c in list_centres(con):
-        st = {"centre": c, "state": "tuscia", "task": None, "next": None, "lock": None, "queue": 0}
+        st = {"centre": c, "state": "tuscia", "task": None, "next": None, "lock": None, "queue": 0,
+              "calendar": cal.get(c["id"])}
         run = db.row(con.execute(
             "SELECT t.*, a.code AS assembly_code, p.code AS project_code FROM tasks t "
             "JOIN assemblies a ON a.id=t.assembly_id JOIN projects p ON p.id=t.project_id "

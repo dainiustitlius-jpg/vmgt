@@ -10,7 +10,7 @@ atsakyti skirtingai.
 from __future__ import annotations
 
 from .. import db
-from . import NotFound, RuleError, components, ncfiles, quality, routing, signals
+from . import NotFound, RuleError, components, ncfiles, quality, routing, signals, workcal
 from .projects import PHASE_LABEL
 
 PAUSE_REASONS = [
@@ -395,7 +395,10 @@ def terminal_view(con, centre: dict, user: dict | None = None) -> dict:
         "WHERE t.centre_id=? AND t.status='baigta' AND substr(("
         "  SELECT MAX(end) FROM intervals i WHERE i.task_id=t.id),1,10)=substr(?,1,10) "
         "ORDER BY t.id DESC LIMIT 20", (centre["id"], now)))
-    return {"centre": centre, "now": now, "running": running, "queue": queue,
+    # ne darbo laikas – įspėjimas, ne draudimas: viršvalandžius ar skubų
+    # darbą sprendžia meistras, terminalas tik paklausia
+    cal = workcal.Calendar(con).status("centre", centre["id"], db.parse_ts(now))
+    return {"centre": centre, "now": now, "running": running, "queue": queue, "calendar": cal,
             "unapproved": unapproved, "done_today": done,
             "pause_reasons": [{"key": k, "label": v} for k, v in PAUSE_REASONS]}
 
@@ -422,9 +425,13 @@ def _flow(con, t) -> None:
 
 
 def plan_view(con, centre: dict) -> list[dict]:
-    """Planuotojo vaizdas: visa centro eilė su būsena ir blokavimo priežastimi."""
+    """Planuotojo vaizdas: visa centro eilė su būsena, blokavimo priežastimi ir
+    prognoze (kada prasidės ir baigsis pagal eilę, normas ir kalendorių)."""
+    from .forecast import forecast
+    fc = forecast(con)
     out = []
     for t in _open_tasks(con, centre["id"]):
+        t["forecast"] = fc.get(t["id"])
         t["strict_order"] = centre["strict_order"]
         t["lock"] = None if t["status"] != "laukia" else block_reason(con, {**t, "approved": 1})
         t["components_missing"] = components.missing_for_assembly(con, t["assembly_id"])

@@ -11,7 +11,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import actions, auth, capacity, components, demo, drawings, meetings, ncfiles, projects, quality, routing, tasks
+from . import (actions, auth, capacity, components, demo, drawings, meetings, ncfiles, projects, quality, routing,
+               tasks, workcal)
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -385,9 +386,41 @@ def seed(con, files_dir: Path, today: datetime | None = None, nc_dir: Path | Non
         ncfiles.save(con, nc_dir, tech, plz, "2210-101_stulpas.dxf", _dxf("2210-101 stulpas, skyles D13", 60, 1800),
                      "Pakeistas tvirtinimo skylių skersmuo")
         _quality(con, uid, files_dir, today, at)
+        _calendar(con, uid, cid, today, at)
     finally:
         db.set_clock(real_clock)
     con.commit()
+
+
+def _calendar(con, uid, cid, today, at) -> None:
+    """Darbo kalendoriaus pavyzdžiai, kad prognozė, apkrova ir cechas turėtų
+    ką rodyti: lazerio baras dirba dviem pamainomis, artimiausias lazerio
+    servisas, dažymo krosnies valymas, suvirintojų šeštadienio viršvalandžiai,
+    gamykla uždaryta tarp Kalėdų ir Naujųjų."""
+    at(today - timedelta(days=3))
+    loc = workcal.local_date(today)
+    nxt = lambda wd, after=2: loc + timedelta(days=after + (wd - (loc + timedelta(days=after)).weekday()) % 7)
+    two = con.execute("SELECT id FROM shift_patterns WHERE name='2 pamainos'").fetchone()
+    mab = con.execute("SELECT id FROM areas WHERE code='MAB'").fetchone()
+    if two and mab:
+        workcal.set_pattern(con, uid["planuotojas"], "area", mab[0], two[0])
+    days = lambda scope, sid, a, b, kind, hours, note, user, **kw: workcal.set_days(con, uid[user], {
+        "scope": scope, "scope_id": sid, "from": a.isoformat(), "to": b.isoformat(), "kind": kind,
+        "hours": hours, "note": note, **kw})
+    srv = nxt(2)                                                  # trečiadienis
+    days("centre", cid["LAZ-01"], srv, srv, "remontas", "", "Planinė lazerio priežiūra – gamintojo servisas",
+         "meistras")
+    oven = nxt(0, 1) if nxt(0, 1) != srv else nxt(1, 1)
+    days("centre", cid["DAZ-02"], oven, oven, "remontas", "07:00-11:00", "Miltelinio dažymo krosnies valymas",
+         "meistras2")
+    sat = nxt(5)
+    svb = con.execute("SELECT id FROM areas WHERE code='SVB'").fetchone()
+    if svb:
+        days("area", svb[0], sat, sat, "papildomas", "07:00-13:00", "Viršvalandžiai – NP talpos T-3000 korpusas",
+             "planuotojas")
+    y = loc.year if loc < date(loc.year, 12, 28) else loc.year + 1
+    days("factory", 0, date(y, 12, 28), date(y, 12, 31), "nedarbo", "", "Gamykla uždaryta tarp švenčių "
+         "(kolektyvinės atostogos)", "vadovas", workdays_only=True)
 
 
 def _quality(con, uid, files_dir, today, at) -> None:

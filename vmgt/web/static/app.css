@@ -577,3 +577,19 @@ table.mx thead .mxp { z-index: 3; background: var(--thead); }
   background: var(--head); color: var(--head-fg); border-radius: 2px; box-shadow: 0 6px 20px rgba(0,0,0,.25); border-left: 4px solid var(--signal); }
 .savebar span { margin-right: auto; }
 .savebar .ghost { color: var(--head-fg); border-color: rgba(255,255,255,.35); }
+
+/* pradžios ekranas: įmonės pastato nuotrauka (vartotojo sprendimas
+   2026-10-26 – viso ekrano fonas). Nuotrauka plati ir žema (≈6:1): ištempus
+   per visą ekraną („cover“) matytųsi tik padidintas logotipo kampas, todėl
+   viršuje ji rodoma visa ir ryški, o likusį ekraną užpildo ta pati
+   nuotrauka, išplauta ir patamsinta – plytelės ant jos įskaitomos. */
+body.home { background: #0d1318; overflow-x: clip; }
+body.home::before { content: ""; position: fixed; inset: -40px; z-index: -1; pointer-events: none;
+  background: url(/static/img/pradzia.webp) center 20% / cover no-repeat; filter: blur(22px) brightness(.42) saturate(.9); }
+.homebg { margin: -20px calc(50% - 50vw) 0; width: 100vw; aspect-ratio: 1901 / 325; max-height: 360px;
+  background: url(/static/img/pradzia.webp) center / cover no-repeat;
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent); mask-image: linear-gradient(180deg, #000 78%, transparent); }
+body.home .homebg + .row, body.home .homebg + .row h1 { color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,.55); }
+body.home .homebg + .row .muted { color: rgba(255,255,255,.8); }
+body.home .mod { --cbg: color-mix(in srgb, var(--paper) 93%, transparent); backdrop-filter: blur(6px); border-color: rgba(255,255,255,.22);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28); }

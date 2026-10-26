@@ -109,7 +109,7 @@ const ROUTES = [
 async function route() {
   S.timers.forEach(clearInterval); S.timers = [];
   closeModal();
-  document.body.classList.remove("term");
+  document.body.classList.remove("term", "home");
   const h = location.hash || "#/";
   if (!S.me && h !== "#/login") {
     try { const r = await GET("/api/me"); S.me = r.user; S.meta = r; }
@@ -254,13 +254,15 @@ function canAt(perm, centre, area) {
 
 async function pageHome() {
   if (!can("view") && can("execute")) { location.hash = "#/t"; return; }
+  document.body.classList.add("home");          // pradžioje – įmonės pastato nuotrauka fone
   const draw = async () => {
     const r = await GET("/api/home");
     const byKey = Object.fromEntries(r.tiles.map(t => [t.key, t]));
     const hour = new Date().getHours();
     const hi = hour < 11 ? "Labas rytas" : hour < 18 ? "Laba diena" : "Labas vakaras";
     const tiles = MODS.filter(m => byKey[m.key] && modSections(m).length);
-    app().innerHTML = `<div class="row between"><div><h1>${hi}, ${esc(S.me.name.split(" ")[0])}</h1>
+    app().innerHTML = `<div class="homebg" role="img" aria-label="VMG Technics pastatas"></div>
+      <div class="row between"><div><h1>${hi}, ${esc(S.me.name.split(" ")[0])}</h1>
         <p class="muted">${esc(S.me.role_label)}${S.me.centres.length ? ` · ${S.me.scope === "own" ? "jūsų barai" : "darbo vietos"}: <b class="mono">${esc(S.me.centres.join(", "))}</b>` : ""}</p></div>
         <span class="muted small">${new Date().toLocaleDateString("lt-LT", { weekday: "long", month: "long", day: "numeric" })}</span></div>
       <div class="mods">${tiles.map(m => {

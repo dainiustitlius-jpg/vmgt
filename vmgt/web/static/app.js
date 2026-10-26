@@ -47,6 +47,7 @@ function modal(html, onMount) {
   onMount && onMount(m.firstElementChild);
 }
 function closeModal() { $("#modal").hidden = true; $("#modal").innerHTML = ""; }
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#modal").hidden) closeModal(); });
 
 // ---------- formatai ----------
 function dur(s) {
@@ -93,6 +94,8 @@ const ROUTES = [
   [/^#\/r\/(\d+)(?:\/d\/([^/]+))?$/, pageRoute],
   [/^#\/r\/(\d+)\/lapai$/, pageRouteCards],
   [/^#\/ncr$/, pageNcr],
+  [/^#\/kokybe(?:\/(\w+))?$/, pageQuality],
+  [/^#\/dosje\/(\d+)$/, pageDossier],
   [/^#\/analitika$/, pageAnalytics],
   [/^#\/komponentai(?:\/(\d+))?$/, pageComponents],
   [/^#\/duomenys$/, pageData],
@@ -125,7 +128,7 @@ function renderNav() {
   top.hidden = false;
   const items = [
     ["#/", "Projektai", "view"], ["#/mano", "Mano darbai", null], ["#/uzduotys", "Užduotys", null], ["#/apkrova", "Apkrova", "view"], ["#/cechas", "Cechas", "view"], ["#/planas", "Planas", "plan"],
-    ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"],
+    ["#/t", "Terminalas", "execute"], ["#/ncr", "Neatitiktys", "ncr_report"], ["#/kokybe", "Kokybė", "view"],
     ["#/komponentai", "Komponentai", "view"],
     ["#/analitika", "Analitika", "view"], ["#/technologija", "Technologija", "tasks"], ["#/duomenys", "Duomenys", "tasks"], ["#/admin", "Administravimas", "admin"],
   ].filter(x => !x[2] || can(x[2]));
@@ -270,6 +273,7 @@ async function pageProject(pid, tab) {
       <label>Vadovas<select name="manager_id" id="pe-man">${opt(active, p.manager_id, "—")}</select></label>
       <label>Terminas<input type="date" name="due_date" value="${esc(p.due_date || "")}" id="pe-due"></label>
       <label>Prioritetas<input type="number" min="1" max="5" name="priority" value="${p.priority}" id="pe-prio" style="width:70px"></label>
+      <label title="EN 1090-2: nuo EXC2 – privalomas medžiagų atsekamumas ir WPS">Vykdymo klasė<select name="exc_class" id="pe-exc">${["", "EXC1", "EXC2", "EXC3", "EXC4"].map(x => `<option value="${x}" ${x === (p.exc_class || "") ? "selected" : ""}>${x || "—"}</option>`).join("")}</select></label>
       <button class="ghost">Įrašyti</button></form>` : ""}
   <div class="card"><div class="row between"><h2>Etapų planas</h2><span class="muted">${p.phases_done} iš ${p.phases_total} baigta</span></div>
     ${gantt(p.phases, asmName)}</div>
@@ -338,7 +342,8 @@ async function pageProject(pid, tab) {
   app().innerHTML = `
   <div class="row between"><div><a href="#/">← Krepšelis</a><h1><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</h1>
     <p class="muted">${esc(p.customer)} · terminas ${esc(p.due_date || "—")} · vadovas ${esc(p.manager_name || "—")}</p></div>
-    <div class="row">${healthBadge(h)} ${pill(p.status, p.status_label)}</div></div>
+    <div class="row">${p.exc_class ? `<span class="pill s-gali" title="EN 1090-2 vykdymo klasė">${esc(p.exc_class)}</span>` : ""} ${healthBadge(h)} ${pill(p.status, p.status_label)}
+      <a class="btn ghost small" href="#/dosje/${p.id}">Kokybės dosjė</a></div></div>
   <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/p/${p.id}/${k}" class="${k === tab ? "on" : ""}">${l}${
     k === "uzduotys" && h.dimensions[1].metrics.actions_overdue ? ` <span class="cnt bad">${h.dimensions[1].metrics.actions_overdue}</span>` :
     k === "neatitiktys" && p.ncr_open ? ` <span class="cnt bad">${p.ncr_open}</span>` : ""}</a>`).join("")}</nav>
@@ -1133,7 +1138,8 @@ async function pageTerminal(code) {
         <div class="q ${!run && i === first ? "next" : ""}" data-q="${t.id}">
           <div><b>${esc(t.project_code)} · ${esc(t.assembly_code)} ${esc(t.assembly_name)}</b><br>${esc(t.name)} · ${t.qty_plan - t.qty_good} vnt.${t.qty_good ? ` (padaryta ${t.qty_good})` : ""}
             ${t.drawing_no ? ` · <a href="/api/drawings/${encodeURIComponent(t.drawing_no)}/file?rev=${encodeURIComponent(t.drawing_current || t.drawing_rev)}" target="_blank">brėžinys ${esc(t.drawing_no)}</a>` : ""}
-            ${flowLine(t)}${filesLine(t)}
+            ${flowLine(t)}${filesLine(t)}${t.wps ? `<div class="flow">WPS <b class="mono">${esc(t.wps.code)}</b> · procesas ${esc(t.wps.process)}</div>` : ""}
+            ${t.held.length ? `<div class="warn">⧗ Padarytos detalės sulaikytos – laukia kokybės kontrolės: ${esc(t.held.join(", "))}</div>` : ""}
             ${t.lock ? `<div class="lock">🔒 ${esc(t.lock)}</div>` : ""}
             ${t.components_missing ? `<div class="warn">⚠ Negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}</div>
           <div>${t.lock && t.lock.includes("revizija") && can("ack_rev") ? `<button class="b-pause" data-ack="${t.id}">Patvirtinti reviziją</button>` : ""}
@@ -1169,6 +1175,7 @@ function runCard(t) {
     <div class="muted">${paused ? "PRISTABDYTA" : "DABAR VYKDOMA"} · projektas ${esc(t.project_code)} ${esc(t.project_name)}</div>
     <h2 style="font-size:22px">${esc(t.assembly_code)} ${esc(t.assembly_name)} · ${esc(t.name)}</h2>
     ${flowLine(t)}${filesLine(t)}
+    ${termQuality(t)}
     ${t.files_pending ? `<div class="warn">⚠ Technologas atnaujino failą vykdant darbą – patikrinkite, ar staklėse nauja versija</div>` : ""}
     <div class="timer" id="timer">${dur(t.work_s + (paused ? 0 : since(t.since)))}</div>
     ${t.components_missing ? `<div class="warn">⚠ Šiam mazgui dar negauti pirktiniai komponentai: ${t.components_missing} eil.</div>` : ""}
@@ -1202,6 +1209,7 @@ function wireRun(t, redraw) {
     modal(`<h2>Baigti darbą</h2><p class="muted">${esc(t.name)} · liko ${left} iš ${t.qty_plan} vnt.</p>
       <div class="qty"><label>Gera<input id="st-good" type="number" min="0" value="${left}"></label><label>Brokas<input id="st-scrap" type="number" min="0" value="0"></label></div>
       <label class="row" style="display:flex"><input type="checkbox" id="st-fin"> užduotis baigta, nors ne visas kiekis</label>
+      ${stopNeeds(t)}
       <p class="muted" id="st-hint"></p>
       <div class="row"><button id="st-ok">Įrašyti</button><button class="ghost" id="st-x">Atšaukti</button></div>`, () => {
       const hint = () => {
@@ -1216,11 +1224,13 @@ function wireRun(t, redraw) {
         const r = await act(() => POST(`/api/terminal/${t.id}/stop`, body), "Įrašyta");
         closeModal();
         const then = () => r.suggest_ncr ? ncrModal({ task_id: t.id, qty: body.scrap, title: "Užregistruokite broką kaip neatitiktį" }, redraw) : redraw();
-        if (r.moved > 0) moveModal(r, then); else then();
+        if (r.held && r.held.length) heldModal(r, then);
+        else if (r.moved > 0) moveModal(r, then); else then();
       };
     });
   };
   $("#b-ncr").onclick = () => ncrModal({ task_id: t.id }, redraw);
+  wireTermQuality(t, redraw);
 }
 
 // ---------- technologo darbo aplinka ----------
@@ -1263,7 +1273,7 @@ async function pageTechList() {
 }
 
 async function pageTechEdit(aid) {
-  const [r, centres] = await Promise.all([GET(`/api/route/${aid}`), GET("/api/centres?all=1")]);
+  const [r, centres, qm] = await Promise.all([GET(`/api/route/${aid}`), GET("/api/centres?all=1"), GET("/api/quality/meta")]);
   const a = r.assembly, rel = r.released, lanes = [...r.branches, ...(r.main ? [r.main] : [])];
   const parts = r.branches.map(b => b.part);
   const centreSel = (sel, id) => `<select data-f="centre_id" ${id} style="max-width:190px">${byArea(centres).map(g => `<optgroup label="${esc(g.name)}">${g.items.map(c =>
@@ -1283,6 +1293,7 @@ async function pageTechEdit(aid) {
           ${rel ? "" : `<button class="small ghost" data-rm="${f.id}" title="Pašalinti iš operacijos" aria-label="Pašalinti ${esc(f.name)}">✕</button>`}</div>`).join("")}
         ${o.needs_files && !(o.files || []).length ? `<div class="s-late small">▣ staklėms reikia failo</div>` : ""}
         ${o.status === "baigta" ? "" : `<label class="btn ghost small upl">+ Failas<input type="file" multiple hidden data-up="${o.id}"></label>`}</td>
+      <td class="qcell">${qualityCell(o, rel, qm)}</td>
       <td><input type="number" min="1" data-f="qty_plan" value="${o.qty_plan}" style="width:64px" ${lock} aria-label="Kiekis"></td>
       <td><input type="number" min="0" step="0.1" data-f="norm_min" value="${o.norm_min || ""}" style="width:74px" aria-label="Norma, min/vnt"></td>
       <td class="nw"><input data-f="drawing_no" value="${esc(o.drawing_no)}" style="width:96px" aria-label="Brėžinys"> <input data-f="drawing_rev" value="${esc(o.drawing_rev)}" style="width:40px" aria-label="Revizija"></td>
@@ -1302,7 +1313,7 @@ async function pageTechEdit(aid) {
     : `<p class="s-baigta">✓ Maršrutas paruoštas išleisti.</p>`}
   <datalist id="parts">${parts.map(p => `<option value="${esc(p)}">`).join("")}</datalist>
   ${lanes.map(l => `<div class="card"><h2>${l.part ? `Detalė <span class="mono">${esc(l.part)}</span>` : `Mazgo operacijos <span class="muted">(čia detalės susilieja)</span>`}</h2>
-    <div class="tbl"><table class="tedit"><thead><tr><th>Seka</th><th>Detalė</th><th>Centras</th><th>Operacija</th><th>Failai</th><th>Kiekis</th><th>Norma min/vnt</th><th>Brėžinys, rev.</th><th></th></tr></thead>
+    <div class="tbl"><table class="tedit"><thead><tr><th>Seka</th><th>Detalė</th><th>Centras</th><th>Operacija</th><th>Failai</th><th>Kokybė</th><th>Kiekis</th><th>Norma min/vnt</th><th>Brėžinys, rev.</th><th></th></tr></thead>
     <tbody>${l.ops.map(row).join("")}</tbody></table></div></div>`).join("") || `<div class="card"><h2>Maršrutas</h2><p class="muted">Operacijų dar nėra – pridėkite žemiau arba nukopijuokite iš panašaus mazgo.</p></div>`}
   ${rel ? "" : `<div class="card"><h2>Pridėti operaciją</h2>
     <form id="addop" class="inline">
@@ -1333,7 +1344,7 @@ async function pageTechEdit(aid) {
     reload();
   };
   $$("tr[data-t] [data-f]").forEach(el => el.onchange = async () => {
-    const f = el.dataset.f, num = ["seq", "qty_plan", "norm_min", "centre_id"].includes(f);
+    const f = el.dataset.f, num = ["seq", "qty_plan", "norm_min", "centre_id", "wps_id"].includes(f);
     await act(() => PUT(`/api/tasks/${el.closest("tr").dataset.t}`, { [f]: num ? +el.value || 0 : el.value.trim() }), "Įrašyta").catch(() => {});
     reload();
   });
@@ -1344,6 +1355,8 @@ async function pageTechEdit(aid) {
     z.ondrop = e => { e.preventDefault(); z.classList.remove("over"); if (e.dataTransfer.files.length) upload(z.dataset.drop, e.dataTransfer.files); };
   });
   $$("[data-rm]").forEach(b => b.onclick = async () => { await act(() => api("DELETE", `/api/files/${b.dataset.rm}`), "Pašalinta"); reload(); });
+  $$("[data-chk-rm]").forEach(b => b.onclick = async () => { await act(() => api("DELETE", `/api/checks/${b.dataset.chkRm}`), "Patikra pašalinta"); reload(); });
+  $$("[data-chk-add]").forEach(b => b.onclick = () => addCheckModal(+b.dataset.chkAdd, qm, reload));
   $$("[data-del]").forEach(b => b.onclick = async () => { await act(() => api("DELETE", `/api/tasks/${b.dataset.del}`), "Operacija pašalinta"); reload(); });
   $$("[data-hist]").forEach(b => b.onclick = async () => {
     const h = await GET(`/api/tasks/${b.dataset.hist}/files?history=1`);
@@ -1529,15 +1542,285 @@ function ncrModal(pre, after, projects) {
   });
 }
 
+// ---------- kokybė (EN 1090 / ISO 3834) ----------
+const CHK_ICON = { laukia: "○", ok: "✓", nok: "✗", isimtis: "≈" };
+const CHK_CLS = { laukia: "muted", ok: "s-baigta", nok: "s-late", isimtis: "warn" };
+const perfLabel = p => p === "qc" ? "KK" : "op.";
+
+function qualityCell(o, rel, qm) {
+  const chk = (o.checks || []).map(c => `<div class="qchk"><span class="${CHK_CLS[c.status]}" title="${esc(c.status)}">${CHK_ICON[c.status]}</span>
+    <span>${esc(c.name)}${c.tolerance ? ` <span class="muted small nw">${esc(c.tolerance)}</span>` : ""} <span class="tag ${c.performer}">${perfLabel(c.performer)}</span></span>
+    ${!rel && c.status === "laukia" ? `<button class="small ghost" data-chk-rm="${c.id}" aria-label="Pašalinti patikrą ${esc(c.name)}">✕</button>` : "<span></span>"}</div>`).join("");
+  const wps = o.centre_kind === "suvirinimas" ? `<label class="wpsl">WPS<select data-f="wps_id" aria-label="WPS">${opt(qm.wps.map(w => ({ id: w.id, name: `${w.code} (${w.process}, ${w.material_group})` })), o.wps_id, "—")}</select></label>` : "";
+  const mats = (o.materials || []).map(m => `<div class="small muted">⬡ ${esc(m.heat_no)} ${esc(m.material)}</div>`).join("");
+  return `${chk}${mats}${wps}${o.status !== "baigta" ? `<button class="small ghost" data-chk-add="${o.id}">+ Patikra</button>` : ""}`;
+}
+
+function addCheckModal(taskId, qm, after) {
+  modal(`<h2>Nauja patikra</h2>
+    <label>Iš šablono<select id="ck-t">${opt(qm.templates.map(t => ({ id: t.id, name: `${t.code} · ${t.name}${t.performer === "qc" ? " (KK)" : ""}` })), "", "— savo patikra —")}</select></label>
+    <div id="ck-own" class="stack">
+      <label>Pavadinimas<input id="ck-n" placeholder="pvz. Įstrižainių skirtumas"></label>
+      <div class="row"><label>Tipas<select id="ck-k"><option value="check">OK / NOK</option><option value="measure">Matavimas</option></select></label>
+        <label>Atlieka<select id="ck-p">${opt(qm.performers)}</select></label></div>
+      <div class="row" id="ck-m" hidden><label>Vardinė<input id="ck-nom" type="number" step="any" style="width:90px"></label>
+        <label>− tol.<input id="ck-lo" type="number" step="any" style="width:70px"></label><label>+ tol.<input id="ck-hi" type="number" step="any" style="width:70px"></label>
+        <label>Vnt.<input id="ck-u" value="mm" style="width:60px"></label></div>
+      <label>Instrukcija<textarea id="ck-i" placeholder="kaip tikrinti, kuo matuoti"></textarea></label></div>
+    <div class="row"><button id="ck-ok">Pridėti</button><button class="ghost" id="ck-x">Atšaukti</button></div>`, () => {
+    const sync = () => { $("#ck-own").hidden = !!$("#ck-t").value; $("#ck-m").hidden = $("#ck-k").value !== "measure"; };
+    $("#ck-t").onchange = sync; $("#ck-k").onchange = sync; sync();
+    $("#ck-x").onclick = closeModal;
+    $("#ck-ok").onclick = async () => {
+      const body = $("#ck-t").value ? { template_id: +$("#ck-t").value } : { name: $("#ck-n").value, kind: $("#ck-k").value, performer: $("#ck-p").value,
+        nominal: $("#ck-nom").value, tol_minus: $("#ck-lo").value, tol_plus: $("#ck-hi").value, unit: $("#ck-u").value, instruction: $("#ck-i").value };
+      await act(() => POST(`/api/tasks/${taskId}/checks`, body), "Patikra pridėta"); closeModal(); after();
+    };
+  });
+}
+
+// terminale: savikontrolė, kokybės inžinieriaus patikros, medžiagos lydinys
+function termQuality(t) {
+  const checks = t.checks || [];
+  if (!checks.length && !t.needs_material && !(t.materials || []).length && !t.wps) return "";
+  return `<div class="tq">
+    ${t.wps ? `<div>WPS <b class="mono">${esc(t.wps.code)}</b> · procesas ${esc(t.wps.process)} · grupė ${esc(t.wps.material_group)}</div>` : ""}
+    ${checks.map(c => `<div class="tqrow ${c.status}"><span class="tqi">${CHK_ICON[c.status]}</span>
+      <div><b>${esc(c.name)}</b>${c.tolerance ? ` <span class="muted">${esc(c.tolerance)}</span>` : ""}${c.instruction ? `<div class="muted small">${esc(c.instruction)}</div>` : ""}
+        ${c.status === "nok" ? `<div class="lock">NOK – užregistruota neatitiktis, pataisykite ir pakartokite</div>` : ""}</div>
+      <div class="tqa">${c.performer === "qc" ? (c.status === "ok" || c.status === "isimtis" ? "" : `<span class="muted">laukia kokybės inžinieriaus</span>`)
+        : c.status === "ok" || c.status === "isimtis" ? `<span class="muted">${c.value != null ? esc(String(c.value).replace(".", ",")) + " " + esc(c.unit) : "OK"}</span>`
+        : c.kind === "measure" ? `<input type="text" inputmode="decimal" autocomplete="off" class="tqv" data-cv="${c.id}" placeholder="${esc(c.unit || "reikšmė")}" aria-label="${esc(c.name)}"><button class="b-ok" data-cm="${c.id}">Įrašyti</button>`
+        : `<button class="b-ok" data-cok="${c.id}">OK</button><button class="b-stop" data-cnok="${c.id}">NOK</button>`}
+        ${can("ack_rev") && (c.status === "laukia" || c.status === "nok") ? `<button class="ghost small" data-cw="${c.id}">Išimtis</button>` : ""}</div></div>`).join("")}
+    ${t.needs_material || (t.materials || []).length ? `<div class="tqrow ${(t.materials || []).length ? "ok" : "laukia"}"><span class="tqi">${(t.materials || []).length ? "✓" : "○"}</span>
+      <div><b>Medžiaga (lydinys)</b>${t.needs_material ? ` <span class="muted">– ${esc(t.exc_class)}: privaloma prieš perduodant</span>` : ""}
+        ${(t.materials || []).map(m => `<div class="muted">⬡ ${esc(m.heat_no)} · ${esc(m.material)} ${esc(m.product)}${m.cert_no ? ` · sert. ${esc(m.cert_no)}` : ""}</div>`).join("")}</div>
+      <div class="tqa"><button class="b-doc" id="tq-lot">${(t.materials || []).length ? "+ Dar lydinys" : "Nurodyti lydinį"}</button></div></div>` : ""}
+  </div>`;
+}
+
+function wireTermQuality(t, redraw) {
+  const res = async (id, body, msg) => {
+    const r = await act(() => POST(`/api/checks/${id}/result`, body));
+    toast(r.ok ? (r.released ? `${msg} · perduota ${r.released} vnt.` : msg) : "NOK – užregistruota neatitiktis", !r.ok);
+    redraw();
+  };
+  $$("[data-cok]").forEach(b => b.onclick = () => res(b.dataset.cok, { ok: true }, "Patikra OK"));
+  $$("[data-cm]").forEach(b => b.onclick = () => res(b.dataset.cm, { value: $(`[data-cv="${b.dataset.cm}"]`).value }, "Įrašyta"));
+  $$("[data-cnok]").forEach(b => b.onclick = () => modal(`<h2>NOK – kas negerai?</h2><label>Aprašymas<textarea id="nk-n"></textarea></label>
+    <div class="row"><button class="b-stop" id="nk-ok">Įrašyti NOK</button><button class="ghost" id="nk-x">Atšaukti</button></div>`, () => {
+    $("#nk-x").onclick = closeModal;
+    $("#nk-ok").onclick = async () => { closeModal(); await res(b.dataset.cnok, { ok: false, note: $("#nk-n").value }, ""); };
+  }));
+  $$("[data-cw]").forEach(b => b.onclick = () => waiveModal(+b.dataset.cw, redraw));
+  const lb = $("#tq-lot");
+  if (lb) lb.onclick = async () => {
+    const lots = await GET("/api/quality/lots?ok=1");
+    modal(`<h2>Iš kurio lydinio pjauta?</h2>
+      <input id="lt-q" placeholder="Ieškoti: lydinio nr., medžiaga, sertifikatas" autocomplete="off">
+      <div class="ltlist" id="lt-l"></div><div><button class="ghost" id="lt-x">Atšaukti</button></div>`, () => {
+      const list = q => $("#lt-l").innerHTML = lots.filter(l => !q || `${l.heat_no} ${l.material} ${l.product} ${l.cert_no}`.toLowerCase().includes(q.toLowerCase()))
+        .slice(0, 40).map(l => `<button class="ghost lt" data-lot="${l.id}"><b class="mono">${esc(l.heat_no)}</b> ${esc(l.material)} · ${esc(l.product)}<span class="muted small">${esc(l.supplier)} · sert. ${esc(l.cert_no || "—")} ${esc(l.cert_type)}</span></button>`).join("")
+        || `<p class="muted">Nerasta. Lydinį užregistruoja sandėlis ar kokybės skyrius („Kokybė → Medžiagos“).</p>`;
+      list(""); $("#lt-q").oninput = e => list(e.target.value); $("#lt-q").focus();
+      $("#lt-x").onclick = closeModal;
+      $("#lt-l").onclick = async e => { const b = e.target.closest("[data-lot]"); if (!b) return;
+        await act(() => POST(`/api/tasks/${t.id}/materials`, { lot_id: +b.dataset.lot }), "Lydinys įrašytas"); closeModal(); redraw(); };
+    });
+  };
+}
+
+function waiveModal(id, after) {
+  modal(`<h2>Išimtis patikrai</h2><p class="muted">Patikra bus laikoma užbaigta be OK rezultato. Priežastis lieka kokybės įraše ir dosjė.</p>
+    <label>Priežastis<textarea id="wv-r" placeholder="pvz. užsakovas raštu sutiko su nukrypimu"></textarea></label>
+    <div class="row"><button id="wv-ok">Leisti išimtį</button><button class="ghost" id="wv-x">Atšaukti</button></div>`, () => {
+    $("#wv-x").onclick = closeModal;
+    $("#wv-ok").onclick = async () => { const r = await act(() => POST(`/api/checks/${id}/waive`, { reason: $("#wv-r").value }), "Išimtis įrašyta"); closeModal(); after(r); };
+  });
+}
+
+// ko dar trūksta, kad detales būtų galima perduoti – rodoma Stop lange iš anksto
+function stopNeeds(t) {
+  const own = (t.checks || []).filter(c => c.performer === "operator" && (c.status === "laukia" || c.status === "nok"));
+  const qc = (t.checks || []).filter(c => c.performer === "qc" && (c.status === "laukia" || c.status === "nok"));
+  const mat = t.needs_material && !(t.materials || []).length;
+  if (!own.length && !mat && !qc.length) return "";
+  return `<div class="card warnbox" style="color:var(--fg)">${own.length || mat ? `<b>Prieš perduodant gerus vienetus:</b><ul>
+    ${own.map(c => `<li>įveskite patikrą „${esc(c.name)}“</li>`).join("")}${mat ? `<li>nurodykite medžiagos lydinį</li>` : ""}</ul>` : ""}
+    ${qc.length ? `<div class="muted">Po Stop detalės bus sulaikytos, kol kokybės inžinierius atliks: ${esc(qc.map(c => c.name).join(", "))}</div>` : ""}</div>`;
+}
+
+function heldModal(r, after) {
+  modal(`<div class="move"><div class="muted">${r.qty_good} VNT. SULAIKYTA</div>
+    <div class="dest" style="border-color:var(--pause)"><span class="arrow" style="color:var(--pause)">⧗</span><div><div class="big-c">Laukia kokybės kontrolės</div>
+      <div class="muted">${esc(r.held.join(", "))} – detalių kol kas neneškite. Perdavimas bus įrašytas, kai kokybės inžinierius patvirtins.</div></div></div>
+    <button id="mv-ok" class="b-ok">Supratau</button></div>`, () => { $("#mv-ok").onclick = () => { closeModal(); after(); }; });
+}
+
+async function ncr8d(id, after) {
+  const [n, qm] = await Promise.all([GET(`/api/ncr/${id}`), GET("/api/quality/meta")]);
+  const ed = can("ncr_manage") && n.status !== "uzdaryta";
+  const field = (k, label, ph) => `<label>${label}${ed ? `<textarea id="d-${k}" placeholder="${esc(ph)}">${esc(n[k] || "")}</textarea>` : `<div>${esc(n[k] || "—")}</div>`}</label>`;
+  modal(`<div class="row between"><h2>Neatitiktis NCR-${n.id}</h2>${pill(n.status, n.status_label)}</div>
+    <p><b class="mono">${esc(n.project_code)}</b> ${esc(n.assembly_code || "")} · ${esc(n.centre_code || "")} ${esc(n.task_name || "")} · ${esc(n.category_label)}${n.qty ? ` · ${n.qty} vnt.` : ""}</p>
+    <p><b>D2 Problema:</b> ${esc(n.description)} <span class="muted small">– ${esc(n.reporter || "")}, ${dt(n.reported_at)}</span></p>
+    ${field("containment", "D3 Laikini veiksmai (izoliavimas)", "kas padaryta iškart: detalės atskirtos, pažymėtos…")}
+    ${field("root_cause", "D4 Šakninė priežastis *", "kodėl įvyko (5 kodėl)")}
+    ${field("corrective", "D5–D6 Korekciniai veiksmai", "kas pataisyta")}
+    ${field("preventive", "D7 Kad nepasikartotų", "procedūros, instrukcijų, įrankių pakeitimai")}
+    <label>Sprendimas dėl gaminio *${ed ? `<select id="d-disposition">${opt(qm.dispositions, n.disposition, "—")}</select>` : `<b>${esc(n.disposition_label || "—")}</b>`}</label>
+    <div><b>Nuotraukos ir dokumentai</b><div class="row">${n.files.map(f => `<a class="fchip" href="/api/ncr_files/${f.id}" target="_blank">📷 ${esc(f.name)}</a>`).join("") || `<span class="muted">nėra</span>`}
+      ${n.status !== "uzdaryta" ? `<label class="btn ghost small upl">+ Nuotrauka<input type="file" accept="image/*,application/pdf" capture="environment" hidden id="d-file"></label>` : ""}</div></div>
+    ${ed ? `<label>D8 Sprendimas (uždarant)<textarea id="d-res">${esc(n.resolution || "")}</textarea></label>`
+      : n.resolution ? `<p><b>D8 Sprendimas:</b> ${esc(n.resolution)}</p>` : ""}
+    <div class="row">${ed ? `<button id="d-close">Uždaryti</button><button class="ghost" id="d-save">Įrašyti juodraštį</button>` : ""}<button class="ghost" id="d-x">Uždaryti langą</button></div>`, () => {
+    const body = () => Object.fromEntries(["containment", "root_cause", "corrective", "preventive", "disposition"].map(k => [k, $(`#d-${k}`).value]));
+    $("#d-x").onclick = () => { closeModal(); after && after(); };
+    const f = $("#d-file");
+    if (f) f.onchange = async () => { const fd = new FormData(); fd.append("file", f.files[0]); await act(() => api("POST", `/api/ncr/${id}/files`, fd, true), "Įkelta"); ncr8d(id, after); };
+    const sv = $("#d-save"); if (sv) sv.onclick = async () => { await act(() => PUT(`/api/ncr/${id}`, body()), "Įrašyta"); ncr8d(id, after); };
+    const cl = $("#d-close"); if (cl) cl.onclick = async () => { await act(() => POST(`/api/ncr/${id}/close`, { ...body(), resolution: $("#d-res").value }), "Neatitiktis uždaryta"); closeModal(); after && after(); };
+  });
+}
+
+async function pageQuality(tab) {
+  const tabs = [...(can("quality") ? [["kontrole", "Kontrolės eilė"]] : []), ["medziagos", "Medžiagos ir sertifikatai"], ["suvirinimas", "Suvirinimas: WPS ir kvalifikacijos"],
+    ...(can("quality") || can("tasks") ? [["sablonai", "Patikrų šablonai"]] : []), ["dosje", "Dosjė"]];
+  tab = tabs.some(t => t[0] === tab) ? tab : tabs[0][0];
+  const head = `<div class="row between"><h1>Kokybė</h1><span class="muted small">EN 1090 / ISO 3834</span></div>
+    <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/kokybe/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
+  const reload = () => pageQuality(tab);
+  if (tab === "kontrole") {
+    const q = await GET("/api/quality/queue");
+    app().innerHTML = head + `<div class="card"><h2>Laukiančios kokybės patikros</h2>
+      <p class="muted">Pirmiausia – tos, dėl kurių ceche sulaikytos detalės. OK – detalės iškart perduodamos kitai operacijai; NOK – užregistruojama neatitiktis.</p>
+      ${q.length ? `<div class="tbl"><table><thead><tr><th>Projektas · mazgas</th><th>Operacija</th><th>Patikra</th><th>Būsena</th><th>Rezultatas</th></tr></thead><tbody>
+      ${q.map(c => `<tr><td><b class="mono">${esc(c.project_code)}</b> ${esc(c.assembly_code)}${c.part_no ? ` <span class="muted">${esc(c.part_no)}</span>` : ""}</td>
+        <td><span class="mono">${esc(c.centre_code)}</span> ${esc(c.task_name)}<div class="muted small">${c.qty_good}/${c.qty_plan} vnt.</div></td>
+        <td><b>${esc(c.name)}</b>${c.tolerance ? `<div class="muted small">${esc(c.tolerance)}</div>` : ""}${c.instruction ? `<div class="muted small">${esc(c.instruction)}</div>` : ""}</td>
+        <td>${c.holding ? `<span class="sev yellow">sulaikyta ${c.qty_good} vnt.</span>` : `<span class="muted">detalės dar gaminamos</span>`}${c.status === "nok" ? ` <span class="sev red">NOK</span>` : ""}</td>
+        <td class="nw">${c.kind === "measure" ? `<input type="text" inputmode="decimal" autocomplete="off" style="width:90px" data-qv="${c.id}" placeholder="${esc(c.unit)}" aria-label="${esc(c.name)}"> <button class="small" data-qm="${c.id}">Įrašyti</button>`
+          : `<button class="small" data-qok="${c.id}">OK</button> <button class="small ghost" data-qnok="${c.id}">NOK</button>`} <button class="small ghost" data-qw="${c.id}">Išimtis</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="s-baigta">✓ Laukiančių patikrų nėra.</p>`}</div>`;
+    const res = async (id, body) => { const r = await act(() => POST(`/api/checks/${id}/result`, body)); toast(r.ok ? `OK${r.released ? ` – perduota ${r.released} vnt.` : ""}` : "NOK – užregistruota neatitiktis", !r.ok); reload(); };
+    $$("[data-qok]").forEach(b => b.onclick = () => res(b.dataset.qok, { ok: true }));
+    $$("[data-qm]").forEach(b => b.onclick = () => res(b.dataset.qm, { value: $(`[data-qv="${b.dataset.qm}"]`).value }));
+    $$("[data-qnok]").forEach(b => b.onclick = () => modal(`<h2>NOK – kas negerai?</h2><label>Aprašymas<textarea id="qn"></textarea></label>
+      <div class="row"><button id="qn-ok">Įrašyti NOK</button><button class="ghost" id="qn-x">Atšaukti</button></div>`, () => {
+      $("#qn-x").onclick = closeModal; $("#qn-ok").onclick = async () => { closeModal(); await res(b.dataset.qnok, { ok: false, note: $("#qn").value }); }; }));
+    $$("[data-qw]").forEach(b => b.onclick = () => waiveModal(+b.dataset.qw, reload));
+    S.timers.push(setInterval(() => { if ($("#modal").hidden && location.hash.startsWith("#/kokybe")) reload(); }, 30000));
+  } else if (tab === "medziagos") {
+    const [lots, qm] = await Promise.all([GET("/api/quality/lots"), GET("/api/quality/meta")]);
+    const canAdd = can("quality") || can("receive");
+    app().innerHTML = head + `${canAdd ? `<form id="lt-new" class="card inline"><h2 style="flex-basis:100%">Gautas metalas</h2>
+      <label>Lydinio nr. *<input name="heat_no" required style="width:120px" id="ln-h"></label><label>Medžiaga *<input name="material" required placeholder="S355J2+N" style="width:120px" id="ln-m"></label>
+      <label>Gaminys<input name="product" placeholder="lakštas t10 3000×1500" id="ln-p"></label><label>Tiekėjas<input name="supplier" id="ln-s"></label>
+      <label>Sertifikato nr.<input name="cert_no" style="width:110px" id="ln-c"></label><label>Tipas<select name="cert_type" id="ln-t">${qm.cert_types.map(x => `<option ${x === "3.1" ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+      <label>Kiekis<input name="qty" type="number" step="any" style="width:80px" id="ln-q"></label><label>Vnt.<input name="unit" value="vnt" style="width:60px" id="ln-u"></label>
+      <label>Sertifikatas (PDF)<input type="file" name="file" accept="application/pdf" id="ln-f"></label><button>Registruoti</button></form>` : ""}
+      <div class="card"><div class="row between"><h2>Lydiniai</h2><input id="lt-s" placeholder="Ieškoti…" style="width:220px"></div>
+      <div class="tbl"><table><thead><tr><th>Lydinys</th><th>Medžiaga</th><th>Tiekėjas</th><th>Sertifikatas</th><th>Gauta</th><th>Panaudota</th><th>Būsena</th></tr></thead>
+      <tbody id="lt-b">${lots.map(l => `<tr data-s="${esc(`${l.heat_no} ${l.material} ${l.product} ${l.supplier} ${l.cert_no}`.toLowerCase())}"><td class="mono"><b>${esc(l.heat_no)}</b></td><td>${esc(l.material)}<div class="muted small">${esc(l.product)}</div></td>
+        <td>${esc(l.supplier || "—")}</td><td>${l.cert_file ? `<a href="/api/quality/lots/${l.id}/cert" target="_blank">${esc(l.cert_no || "PDF")}</a>` : esc(l.cert_no || "—")} <span class="muted">${esc(l.cert_type)}</span></td>
+        <td class="num">${dt(l.received_at)}<div class="muted small">${esc(l.received_by_name || "")}</div></td><td class="num">${l.used} op.</td>
+        <td>${l.status === "tinkama" ? pill("baigta", "tinkama") : `${pill("atvira", "blokuota")}<div class="lock small">${esc(l.note)}</div>`}
+          ${can("quality") ? `<button class="small ghost" data-lst="${l.id}" data-to="${l.status === "tinkama" ? "blokuota" : "tinkama"}">${l.status === "tinkama" ? "Blokuoti" : "Atblokuoti"}</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">Lydinių dar nėra.</td></tr>`}</tbody></table></div></div>`;
+    $("#lt-s").oninput = e => $$("#lt-b tr[data-s]").forEach(r => (r.hidden = !r.dataset.s.includes(e.target.value.toLowerCase())));
+    const f = $("#lt-new"); if (f) f.onsubmit = async e => { e.preventDefault(); const fd = new FormData(f); if (!$("#ln-f").files.length) fd.delete("file");
+      await act(() => api("POST", "/api/quality/lots", fd, true), "Lydinys užregistruotas"); reload(); };
+    $$("[data-lst]").forEach(b => b.onclick = async () => {
+      const note = b.dataset.to === "blokuota" ? prompt("Kodėl medžiaga blokuojama?") : "";
+      if (b.dataset.to === "blokuota" && !note) return;
+      await act(() => POST(`/api/quality/lots/${b.dataset.lst}/status`, { status: b.dataset.to, note }), "Įrašyta"); reload(); });
+  } else if (tab === "suvirinimas") {
+    const [wps, quals, users] = await Promise.all([GET("/api/quality/wps"), GET("/api/quality/qualifications"), GET("/api/users").catch(() => [])]);
+    const qe = can("quality");
+    app().innerHTML = head + `<div class="card"><h2>Suvirintojų kvalifikacijos</h2>
+      <p class="muted">Terminalas neleidžia pradėti suvirinimo pagal WPS, jei prisijungęs suvirintojas neturi galiojančios kvalifikacijos tam procesui ir medžiagų grupei.</p>
+      <div class="tbl"><table><thead><tr><th>Suvirintojas</th><th>Standartas</th><th>Procesas</th><th>Grupė</th><th>Sertifikatas</th><th>Galioja iki</th></tr></thead><tbody>
+      ${quals.map(x => `<tr><td>${esc(x.user_name)}</td><td>${esc(x.standard)}</td><td class="mono">${esc(x.process)}</td><td class="mono">${esc(x.material_group)}</td>
+        <td>${x.file ? `<a href="/api/quality/file?path=${encodeURIComponent(x.file)}" target="_blank">${esc(x.cert_no || "PDF")}</a>` : esc(x.cert_no || "—")}</td>
+        <td class="num ${x.valid ? (x.expires_soon ? "warn" : "") : "s-late"}">${esc(x.valid_until)}${x.valid ? (x.expires_soon ? " · baigiasi" : "") : " · negalioja"}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Kvalifikacijų dar nėra.</td></tr>`}</tbody></table></div>
+      ${qe ? `<form id="ql-new" class="inline"><label>Suvirintojas<select name="user_id" id="qn-u">${opt(users.filter(u => u.active && u.perms.includes("execute")), "")}</select></label>
+        <label>Procesas<input name="process" required placeholder="135" style="width:70px" id="qn-p"></label><label>Grupė<input name="material_group" required placeholder="1.1" style="width:70px" id="qn-g"></label>
+        <label>Standartas<input name="standard" value="ISO 9606-1" style="width:110px" id="qn-s"></label><label>Sert. nr.<input name="cert_no" style="width:110px" id="qn-c"></label>
+        <label>Galioja iki<input type="date" name="valid_until" required id="qn-v"></label><label>PDF<input type="file" name="file" accept="application/pdf" id="qn-f"></label><button class="ghost">Pridėti</button></form>` : ""}</div>
+      <div class="card"><h2>Suvirinimo procedūros (WPS)</h2>
+      <div class="tbl"><table><thead><tr><th>Kodas</th><th>Procesas</th><th>Medžiagų grupė</th><th>Aprašymas</th><th>Dokumentas</th></tr></thead><tbody>
+      ${wps.map(w => `<tr><td class="mono"><b>${esc(w.code)}</b></td><td class="mono">${esc(w.process)}</td><td class="mono">${esc(w.material_group)}</td><td>${esc(w.description)}</td>
+        <td>${w.file ? `<a href="/api/quality/file?path=${encodeURIComponent(w.file)}" target="_blank">PDF</a>` : "—"}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">WPS dar nėra.</td></tr>`}</tbody></table></div>
+      ${qe ? `<form id="wp-new" class="inline"><label>Kodas<input name="code" required style="width:120px" id="wn-c"></label><label>Procesas<input name="process" required placeholder="135" style="width:70px" id="wn-p"></label>
+        <label>Grupė<input name="material_group" required placeholder="1.1" style="width:70px" id="wn-g"></label><label>Aprašymas<input name="description" id="wn-d"></label>
+        <label>PDF<input type="file" name="file" accept="application/pdf" id="wn-f"></label><button class="ghost">Pridėti WPS</button></form>` : ""}</div>`;
+    const form = (id, url, msg) => { const f = $(id); if (f) f.onsubmit = async e => { e.preventDefault(); const fd = new FormData(f); if (!f.querySelector("[type=file]").files.length) fd.delete("file");
+      await act(() => api("POST", url, fd, true), msg); reload(); }; };
+    form("#ql-new", "/api/quality/qualifications", "Kvalifikacija pridėta"); form("#wp-new", "/api/quality/wps", "WPS pridėtas");
+  } else if (tab === "sablonai") {
+    const [list, qm] = await Promise.all([GET("/api/quality/templates?all=1"), GET("/api/quality/meta")]);
+    app().innerHTML = head + `<div class="card"><h2>Patikrų šablonai</h2><p class="muted">Technologas juos priskiria operacijoms maršruto redaktoriuje („+ Patikra“).</p>
+      <div class="tbl"><table><thead><tr><th>Kodas</th><th>Patikra</th><th>Tipas</th><th>Atlieka</th><th>Instrukcija</th></tr></thead><tbody>
+      ${list.map(t => `<tr class="${t.active ? "" : "dim"}"><td class="mono">${esc(t.code)}</td><td><b>${esc(t.name)}</b></td>
+        <td>${t.kind === "measure" ? `matavimas ${esc(String(t.nominal ?? "").replace(".", ","))} −${t.tol_minus ?? 0}/+${t.tol_plus ?? 0} ${esc(t.unit)}` : "OK / NOK"}</td>
+        <td>${esc((qm.performers.find(p => p.key === t.performer) || {}).label || t.performer)}</td><td class="small">${esc(t.instruction)}</td></tr>`).join("")}</tbody></table></div>
+      <form id="tp-new" class="inline"><label>Kodas<input name="code" required style="width:100px" id="tn-c"></label><label>Pavadinimas<input name="name" required id="tn-n"></label>
+        <label>Tipas<select name="kind" id="tn-k"><option value="check">OK / NOK</option><option value="measure">Matavimas</option></select></label>
+        <label>Vardinė<input name="nominal" type="number" step="any" style="width:80px" id="tn-v"></label><label>−tol.<input name="tol_minus" type="number" step="any" style="width:70px" id="tn-lo"></label>
+        <label>+tol.<input name="tol_plus" type="number" step="any" style="width:70px" id="tn-hi"></label><label>Vnt.<input name="unit" style="width:60px" id="tn-u"></label>
+        <label>Atlieka<select name="performer" id="tn-p">${opt(qm.performers)}</select></label><label>Instrukcija<input name="instruction" id="tn-i"></label><button class="ghost">Pridėti</button></form></div>`;
+    $("#tp-new").onsubmit = async e => { e.preventDefault(); await act(() => POST("/api/quality/templates", formData(e.target)), "Šablonas pridėtas"); reload(); };
+  } else {
+    const ps = await GET("/api/projects?all=1");
+    app().innerHTML = head + `<div class="card"><h2>Projekto kokybės dosjė</h2><p class="muted">Medžiagų atsekamumas, suvirinimo žurnalas, patikrų protokolas, neatitiktys – spausdinimui ar PDF, priedai – ZIP.</p>
+      <div class="tbl"><table><thead><tr><th>Projektas</th><th>Klasė</th><th>Būsena</th><th></th></tr></thead><tbody>
+      ${ps.map(p => `<tr><td><b class="mono">${esc(p.code)}</b> ${esc(p.name)}</td><td>${esc(p.exc_class || "—")}</td><td>${pill(p.status, p.status_label)}</td>
+        <td><a class="btn ghost small" href="#/dosje/${p.id}">Atidaryti</a></td></tr>`).join("")}</tbody></table></div></div>`;
+  }
+}
+
+async function pageDossier(pid) {
+  const d = await GET(`/api/quality/dossier/${pid}`);
+  const p = d.project, st = { laukia: "laukia", ok: "OK", nok: "NOK", isimtis: "išimtis" };
+  app().innerHTML = `<div class="row between noprint"><a href="#/kokybe/dosje">← Kokybė</a>
+    <div class="row"><a class="btn ghost" href="/api/quality/dossier/${pid}/zip">⬇ Priedai (ZIP)</a><button id="dp">🖨 Spausdinti / PDF</button></div></div>
+  <section class="dossier">
+    <div class="rc-head"><div><div class="muted">KOKYBĖS DOSJĖ · EN 1090 / ISO 3834</div><h1><span class="mono">${esc(p.code)}</span> ${esc(p.name)}</h1>
+      <div>${esc(p.customer)} · vadovas ${esc(p.manager_name || "—")} · vykdymo klasė <b>${esc(p.exc_class || "nenurodyta")}</b></div>
+      <div class="muted small">Sudaryta ${dt(d.generated)}</div></div>
+      <div>${d.complete ? pill("baigta", "dosjė pilnas") : pill("atvira", `trūksta: ${d.gaps.length}`)}</div></div>
+    ${d.gaps.length ? `<div class="card warnbox"><h2>Ko trūksta</h2><ul>${d.gaps.map(g => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
+    <div class="card"><h2>1. Medžiagų atsekamumas</h2>${simple(d.materials, ["Mazgas · detalė", "Operacija", "Lydinys", "Medžiaga", "Sertifikatas"], m => [
+      `${esc(m.assembly)}${m.part ? ` <span class="mono">${esc(m.part)}</span>` : ""}`, `<span class="mono">${esc(m.centre)}</span> ${esc(m.operation)}`, `<b class="mono">${esc(m.heat_no)}</b>`,
+      `${esc(m.material)} <span class="muted">${esc(m.product)}</span>`, `${m.has_cert ? `<a href="/api/quality/lots/${m.lot_id}/cert" target="_blank">${esc(m.cert_no || "PDF")}</a>` : esc(m.cert_no || "—")} ${esc(m.cert_type)}`])}</div>
+    <div class="card"><h2>2. Suvirinimo žurnalas</h2>${simple(d.welding, ["Mazgas", "Operacija", "WPS", "Suvirintojas", "Kvalifikacija", "Laikas"], w => [
+      esc(w.assembly), `<span class="mono">${esc(w.centre)}</span> ${esc(w.operation)}`, `<span class="mono">${esc(w.wps || "—")}</span>`, esc(w.welder),
+      w.qualification ? `${esc(w.qualification.cert_no || "")} ${esc(w.qualification.process)}/${esc(w.qualification.material_group)} <span class="${w.qualification.valid_until >= (w.end || "").slice(0, 10) ? "" : "s-late"}">iki ${esc(w.qualification.valid_until)}</span>` : `<span class="s-late">nėra</span>`,
+      `<span class="num">${dt(w.start)} – ${dt(w.end)}</span>`])}</div>
+    <div class="card"><h2>3. Patikrų protokolas</h2>${simple(d.inspections, ["Mazgas", "Operacija", "Patikra", "Rezultatas", "Kas, kada"], c => [
+      `${esc(c.assembly)}${c.part ? ` <span class="mono">${esc(c.part)}</span>` : ""}`, `<span class="mono">${esc(c.centre)}</span> ${esc(c.operation)}`,
+      `${esc(c.name)}${c.tolerance ? ` <span class="muted">${esc(c.tolerance)}</span>` : ""}`,
+      `<span class="${CHK_CLS[c.status]}">${esc(st[c.status])}${c.value != null ? ` · ${esc(String(c.value).replace(".", ","))} ${esc(c.unit)}` : ""}</span>${c.waiver_reason ? `<div class="small">${esc(c.waiver_reason)}</div>` : ""}`,
+      `${esc(c.done_by_name || "—")} <span class="muted">${dt(c.done_at)}</span>`])}</div>
+    <div class="card"><h2>4. Neatitiktys</h2>${d.ncr.length ? d.ncr.map(n => `<div class="ncr8"><div class="row between"><b>NCR-${n.id} · ${esc(n.category_label)}</b>${pill(n.status, n.status_label)}</div>
+      <div>${esc(n.description)} <span class="muted small">${dt(n.reported_at)}, ${esc(n.reporter || "")}</span></div>
+      ${[["Laikini veiksmai", n.containment], ["Šakninė priežastis", n.root_cause], ["Korekciniai veiksmai", n.corrective], ["Kad nepasikartotų", n.preventive], ["Sprendimas dėl gaminio", n.disposition_label], ["Sprendimas", n.resolution !== n.corrective ? n.resolution : ""]]
+        .filter(x => x[1]).map(([k, v]) => `<div class="small"><b>${k}:</b> ${esc(v)}</div>`).join("")}
+      ${n.files.length ? `<div class="small muted">Priedai: ${n.files.map(f => esc(f.name)).join(", ")}</div>` : ""}</div>`).join("") : `<p class="muted">Neatitikčių nebuvo.</p>`}</div>
+  </section>`;
+  $("#dp").onclick = () => window.print();
+}
+
 // ---------- neatitiktys ----------
 function ncrTable(list, manage, users) {
   if (!list.length) return `<p class="muted">Neatitikčių nėra.</p>`;
-  return `<div class="tbl"><table><thead><tr><th>Nr.</th><th>Data</th><th>Projektas · mazgas</th><th>Operacija</th><th>Kategorija</th><th>Aprašymas</th><th>Būsena</th>${manage ? "<th></th>" : ""}</tr></thead>
+  return `<div class="tbl"><table><thead><tr><th>Nr.</th><th>Data</th><th>Projektas · mazgas</th><th>Operacija</th><th>Kategorija</th><th>Aprašymas</th><th>Būsena</th><th></th></tr></thead>
     <tbody>${list.map(n => `<tr><td class="num">${n.id}</td><td class="num">${dt(n.reported_at)}<br><span class="muted">${esc(n.reporter || "")}</span></td>
       <td><span class="mono">${esc(n.project_code)}</span> ${esc(n.assembly_code || "")}</td><td>${esc(n.centre_code || "")} ${esc(n.task_name || "")}</td>
       <td>${esc(n.category_label)}${n.qty ? ` · ${n.qty} vnt.` : ""}</td><td>${esc(n.description)}${n.resolution ? `<br><span class="muted">Sprendimas: ${esc(n.resolution)}</span>` : ""}</td>
       <td>${pill(n.status, n.status_label)}${n.assignee ? `<br><span class="muted">${esc(n.assignee)}</span>` : ""}</td>
-      ${manage ? `<td>${n.status !== "uzdaryta" ? `<select data-asg="${n.id}" id="asg-${n.id}">${opt(users, n.assignee_id, "Priskirti…")}</select> <button class="small ghost" data-close="${n.id}">Uždaryti</button>` : ""}</td>` : ""}</tr>`).join("")}</tbody></table></div>`;
+      ${manage ? `<td class="nw">${n.status !== "uzdaryta" ? `<select data-asg="${n.id}" id="asg-${n.id}">${opt(users, n.assignee_id, "Priskirti…")}</select> ` : ""}<button class="small ghost" data-8d="${n.id}">${n.status !== "uzdaryta" ? "8D / uždaryti" : "8D"}</button></td>`
+        : `<td><button class="small ghost" data-8d="${n.id}">Atidaryti</button></td>`}</tr>`).join("")}</tbody></table></div>`;
 }
 
 async function pageNcr() {
@@ -1551,11 +1834,7 @@ async function pageNcr() {
   $("#nst").onchange = e => { sessionStorage.setItem("pf.ncr", e.target.value); pageNcr(); };
   const nn = $("#nnew"); if (nn) nn.onclick = () => ncrModal({}, pageNcr, projects);
   $$("[data-asg]").forEach(s => s.onchange = async () => { if (!s.value) return; await act(() => POST(`/api/ncr/${s.dataset.asg}/assign`, { assignee_id: +s.value }), "Priskirta"); pageNcr(); });
-  $$("[data-close]").forEach(b => b.onclick = () => modal(`<h2>Uždaryti neatitiktį #${b.dataset.close}</h2><label>Sprendimas<textarea id="res"></textarea></label>
-    <div class="row"><button id="c-ok">Uždaryti</button><button class="ghost" id="c-x">Atšaukti</button></div>`, () => {
-    $("#c-x").onclick = closeModal;
-    $("#c-ok").onclick = async () => { await act(() => POST(`/api/ncr/${b.dataset.close}/close`, { resolution: $("#res").value }), "Uždaryta"); closeModal(); pageNcr(); };
-  }));
+  $$("[data-8d]").forEach(b => b.onclick = () => ncr8d(+b.dataset["8d"], pageNcr));
 }
 
 // ---------- analitika ----------

@@ -16,8 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from .. import config as cfgmod
 from .. import db
 from ..services import (NotFound, RuleError, actions, analytics, auth, capacity, components, drawings, health,
-                        importer, layout, meetings, ncfiles, ncr, planner, projects, routing, seed, signals,
-                        tasks)
+                        importer, layout, meetings, ncfiles, ncr, planner, projects, quality, routing, seed,
+                        signals, tasks)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "vmgt_session"
@@ -305,7 +305,7 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.get("/api/terminal/{code}")
     def terminal(code: str, user=Depends(need("execute")), con=Depends(get_con)):
-        return tasks.terminal_view(con, _centre_for(con, user, code))
+        return tasks.terminal_view(con, _centre_for(con, user, code), user)
 
     @app.post("/api/terminal/{tid}/start")
     def t_start(tid: int, user=Depends(need("execute")), con=Depends(get_con)):
@@ -442,8 +442,175 @@ def create_app(cfg: cfgmod.Config | None = None) -> FastAPI:
 
     @app.post("/api/ncr/{nid}/close")
     def ncr_close(nid: int, body: dict, user=Depends(need("ncr_manage")), con=Depends(get_con)):
+        # 8D: uždarant – šakninė priežastis ir sprendimas dėl gaminio privalomi
+        quality.update_ncr(con, user, nid, {k: body[k] for k in ("containment", "root_cause", "corrective",
+                                                                 "preventive", "disposition") if k in body})
+        n = db.row(con.execute("SELECT root_cause, disposition FROM ncr WHERE id=?", (nid,)))
+        if not n or not n["root_cause"] or not n["disposition"]:
+            raise HTTPException(409, "Uždarant nurodykite šakninę priežastį ir sprendimą dėl gaminio")
         ncr.close(con, user, nid, body.get("resolution", ""))
         return {"ok": True}
+
+    @app.get("/api/ncr/{nid}")
+    def ncr_get(nid: int, user=Depends(need("ncr_report")), con=Depends(get_con)):
+        n = db.row(con.execute("SELECT id FROM ncr WHERE id=?", (nid,)))
+        if not n:
+            raise HTTPException(404, "Neatitikties nėra")
+        x = next(r for r in ncr.list_ncr(con) if r["id"] == nid)
+        x["files"] = quality.ncr_files(con, nid)
+        x["disposition_label"] = quality.DISPOSITION_LABEL.get(x.get("disposition") or "", "")
+        return x
+
+    @app.put("/api/ncr/{nid}")
+    def ncr_put(nid: int, body: dict, user=Depends(need("ncr_manage")), con=Depends(get_con)):
+        quality.update_ncr(con, user, nid, body)
+        return {"ok": True}
+
+    @app.post("/api/ncr/{nid}/files")
+    async def ncr_file_up(nid: int, file: UploadFile = File(...), user=Depends(need("ncr_report")),
+                          con=Depends(get_con)):
+        return {"id": quality.add_ncr_file(con, cfg.files_dir, user, nid, file.filename or "foto.jpg", await file.read())}
+
+    @app.get("/api/ncr_files/{fid}")
+    def ncr_file_get(fid: int, user=Depends(need("ncr_report")), con=Depends(get_con)):
+        f = db.row(con.execute("SELECT * FROM ncr_files WHERE id=?", (fid,)))
+        if not f:
+            raise HTTPException(404, "Failo nėra")
+        return FileResponse(quality.stored_path(cfg.files_dir, f["stored"]), filename=f["name"])
+
+    # ---------- kokybė: patikros, medžiagos, suvirinimas, dosjė ----------
+
+    def any_perm(*ps):
+        def dep(user=Depends(get_user)):
+            if not auth.perms_of(user) & set(ps):
+                raise HTTPException(403, "Neturite teisės šiam veiksmui")
+            return user
+        return dep
+
+    @app.get("/api/quality/meta")
+    def q_meta(user=Depends(get_user), con=Depends(get_con)):
+        return {"exc_classes": quality.EXC_CLASSES, "performers": [{"key": k, "label": v} for k, v in quality.PERFORMERS],
+                "dispositions": [{"key": k, "label": v} for k, v in quality.DISPOSITIONS],
+                "cert_types": quality.CERT_TYPES, "templates": quality.list_templates(con), "wps": quality.list_wps(con)}
+
+    @app.get("/api/quality/templates")
+    def q_templates(all: int = 0, user=Depends(any_perm("tasks", "quality")), con=Depends(get_con)):
+        return quality.list_templates(con, not all)
+
+    @app.post("/api/quality/templates")
+    def q_template_new(body: dict, user=Depends(any_perm("tasks", "quality")), con=Depends(get_con)):
+        return {"id": quality.save_template(con, user["id"], body)}
+
+    @app.put("/api/quality/templates/{tid}")
+    def q_template_put(tid: int, body: dict, user=Depends(any_perm("tasks", "quality")), con=Depends(get_con)):
+        return {"id": quality.save_template(con, user["id"], body, tid)}
+
+    @app.post("/api/tasks/{tid}/checks")
+    def q_check_add(tid: int, body: dict, user=Depends(any_perm("tasks", "quality")), con=Depends(get_con)):
+        return {"id": quality.add_check(con, user["id"], tid, body)}
+
+    @app.delete("/api/checks/{cid}")
+    def q_check_del(cid: int, user=Depends(any_perm("tasks", "quality")), con=Depends(get_con)):
+        quality.remove_check(con, user["id"], cid)
+        return {"ok": True}
+
+    @app.post("/api/checks/{cid}/result")
+    def q_check_result(cid: int, body: dict, user=Depends(any_perm("execute", "quality")), con=Depends(get_con)):
+        return quality.record(con, user, cid, body.get("ok"), body.get("value"), body.get("note", ""))
+
+    @app.post("/api/checks/{cid}/waive")
+    def q_check_waive(cid: int, body: dict, user=Depends(any_perm("quality", "ack_rev")), con=Depends(get_con)):
+        return quality.waive(con, user, cid, body.get("reason", ""))
+
+    @app.get("/api/checks/{cid}/history")
+    def q_check_hist(cid: int, user=Depends(get_user), con=Depends(get_con)):
+        return db.rows(con.execute("SELECT r.*, u.name AS user_name FROM check_results r LEFT JOIN users u "
+                                   "ON u.id=r.user_id WHERE r.check_id=? ORDER BY r.at", (cid,)))
+
+    @app.get("/api/quality/queue")
+    def q_queue(user=Depends(need("quality")), con=Depends(get_con)):
+        return quality.qc_queue(con)
+
+    @app.get("/api/quality/lots")
+    def q_lots(q: str = "", ok: int = 0, user=Depends(any_perm("view", "execute")), con=Depends(get_con)):
+        return quality.list_lots(con, q, bool(ok))
+
+    @app.post("/api/quality/lots")
+    async def q_lot_new(heat_no: str = Form(...), material: str = Form(...), product: str = Form(""),
+                        supplier: str = Form(""), cert_no: str = Form(""), cert_type: str = Form("3.1"),
+                        qty: float = Form(0), unit: str = Form("vnt"), note: str = Form(""),
+                        file: UploadFile | None = File(None), user=Depends(any_perm("quality", "receive")),
+                        con=Depends(get_con)):
+        data = {"heat_no": heat_no, "material": material, "product": product, "supplier": supplier,
+                "cert_no": cert_no, "cert_type": cert_type, "qty": qty, "unit": unit, "note": note}
+        content = await file.read() if file else None
+        return {"id": quality.save_lot(con, cfg.files_dir, user, data, content or None, file.filename if file else "")}
+
+    @app.post("/api/quality/lots/{lid}/status")
+    def q_lot_status(lid: int, body: dict, user=Depends(need("quality")), con=Depends(get_con)):
+        quality.set_lot_status(con, user, lid, body.get("status"), body.get("note", ""))
+        return {"ok": True}
+
+    @app.get("/api/quality/lots/{lid}/cert")
+    def q_lot_cert(lid: int, user=Depends(any_perm("view", "execute")), con=Depends(get_con)):
+        lot = db.row(con.execute("SELECT * FROM material_lots WHERE id=?", (lid,)))
+        if not lot or not lot["cert_file"]:
+            raise HTTPException(404, "Sertifikato nėra")
+        return FileResponse(quality.stored_path(cfg.files_dir, lot["cert_file"]), media_type="application/pdf",
+                            headers={"Content-Disposition": f'inline; filename="{lot["heat_no"]}.pdf"'})
+
+    @app.post("/api/tasks/{tid}/materials")
+    def q_use_lot(tid: int, body: dict, user=Depends(any_perm("execute", "quality")), con=Depends(get_con)):
+        return {"id": quality.use_lot(con, user, tid, int(body.get("lot_id") or 0), body.get("qty") or 1)}
+
+    @app.get("/api/quality/wps")
+    def q_wps(user=Depends(get_user), con=Depends(get_con)):
+        return quality.list_wps(con, active_only=False)
+
+    @app.post("/api/quality/wps")
+    async def q_wps_new(code: str = Form(...), process: str = Form(...), material_group: str = Form(...),
+                        description: str = Form(""), file: UploadFile | None = File(None),
+                        user=Depends(need("quality")), con=Depends(get_con)):
+        content = await file.read() if file else None
+        return {"id": quality.save_wps(con, cfg.files_dir, user["id"], {"code": code, "process": process,
+                                       "material_group": material_group, "description": description}, content or None)}
+
+    @app.get("/api/quality/qualifications")
+    def q_quals(user=Depends(any_perm("view", "quality")), con=Depends(get_con)):
+        return quality.list_qualifications(con)
+
+    @app.post("/api/quality/qualifications")
+    async def q_qual_new(user_id: int = Form(...), process: str = Form(...), material_group: str = Form(...),
+                         valid_until: str = Form(...), standard: str = Form("ISO 9606-1"), cert_no: str = Form(""),
+                         note: str = Form(""), file: UploadFile | None = File(None), user=Depends(need("quality")),
+                         con=Depends(get_con)):
+        content = await file.read() if file else None
+        return {"id": quality.save_qualification(con, cfg.files_dir, user["id"], {
+            "user_id": user_id, "process": process, "material_group": material_group, "valid_until": valid_until,
+            "standard": standard, "cert_no": cert_no, "note": note}, content or None)}
+
+    @app.put("/api/quality/qualifications/{qid}")
+    def q_qual_put(qid: int, body: dict, user=Depends(need("quality")), con=Depends(get_con)):
+        return {"id": quality.save_qualification(con, cfg.files_dir, user["id"], body, None, qid)}
+
+    @app.get("/api/quality/file")
+    def q_file(path: str, user=Depends(any_perm("view", "quality")), con=Depends(get_con)):
+        # tik WPS ir kvalifikacijų failai – kelias tikrinamas, kad neišeitų iš katalogo
+        if not path.startswith(("wps/", "kvalifikacijos/")):
+            raise HTTPException(404, "Failo nėra")
+        return FileResponse(quality.stored_path(cfg.files_dir, path))
+
+    @app.get("/api/quality/dossier/{pid}")
+    def q_dossier(pid: int, user=Depends(need("view")), con=Depends(get_con)):
+        return quality.dossier(con, pid)
+
+    @app.get("/api/quality/dossier/{pid}/zip")
+    def q_dossier_zip(pid: int, user=Depends(need("view")), con=Depends(get_con)):
+        code = db.row(con.execute("SELECT code FROM projects WHERE id=?", (pid,)))
+        if not code:
+            raise HTTPException(404, "Projekto nėra")
+        return Response(quality.dossier_zip(con, cfg.files_dir, pid), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{code["code"]}_kokybes_dosje.zip"'})
 
     # ---------- resursų apkrova ----------
 

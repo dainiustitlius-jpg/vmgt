@@ -24,7 +24,7 @@ STORE = "Mazgas baigtas – į sandėlį / išsiuntimui"
 
 _OPS_SQL = (
     "SELECT t.id, t.assembly_id, t.project_id, t.seq, t.name, t.part_no, t.qty_plan, t.qty_good, t.qty_scrap, "
-    "t.norm_min, t.status, t.approved, t.drawing_no, t.drawing_rev, t.centre_id, "
+    "t.norm_min, t.status, t.approved, t.drawing_no, t.drawing_rev, t.centre_id, t.wps_id, c.kind AS centre_kind, "
     "c.code AS centre_code, c.name AS centre_name, c.needs_files, ar.code AS area_code, ar.name AS area_name "
     "FROM tasks t JOIN work_centres c ON c.id=t.centre_id LEFT JOIN areas ar ON ar.id=c.area_id ")
 
@@ -173,6 +173,10 @@ def check(con, assembly_id) -> dict:
             warnings.append(f"{o['centre_code']} · {o['name']}: nenurodyta norma")
         if not o["drawing_no"]:
             warnings.append(f"{o['centre_code']} · {o['name']}: nenurodytas brėžinys")
+    from .quality import route_check
+    qe, qw = route_check(con, assembly_id, ops)
+    errors += qe
+    warnings += qw
     a = _assembly(con, assembly_id)
     for code in [c for c in a["requires"].split(",") if c]:
         r = con.execute("SELECT released_at FROM assemblies WHERE project_id=? AND code=?",
@@ -240,12 +244,16 @@ def trace(con, assembly_id) -> dict:
 
     a = _assembly(con, assembly_id)
     st = structure(con, assembly_id)
-    files = _files(con, [o for b in st["branches"] for o in b["ops"]] + st["main"])
+    all_ops = [o for b in st["branches"] for o in b["ops"]] + st["main"]
+    files = _files(con, all_ops)
+    from .quality import checks_for, materials_for
+    checks, mats = checks_for(con, [o["id"] for o in all_ops]), materials_for(con, [o["id"] for o in all_ops])
 
     def lane(ops, part):
         out = []
         for i, o in enumerate(ops):
             o["files"] = files[o["id"]]
+            o["checks"], o["materials"] = checks[o["id"]], mats[o["id"]]
             ups = upstream(con, o, st)
             o["here"] = _where(o, ups, i == 0)
             o["arrived"] = arrived(o, ups)

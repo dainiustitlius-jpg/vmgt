@@ -10,7 +10,7 @@ atsakyti skirtingai.
 from __future__ import annotations
 
 from .. import db
-from . import NotFound, RuleError, components, ncfiles, routing, signals
+from . import NotFound, RuleError, components, ncfiles, quality, routing, signals
 from .projects import PHASE_LABEL
 
 PAUSE_REASONS = [
@@ -70,8 +70,10 @@ def create_task(con, by, data: dict) -> int:
 
 def update_task(con, by, task_id, data: dict) -> None:
     t = _task(con, task_id)
-    vals = {k: data[k] for k in ("name", "part_no", "qty_plan", "norm_min", "drawing_no", "drawing_rev", "seq")
+    vals = {k: data[k] for k in ("name", "part_no", "qty_plan", "norm_min", "drawing_no", "drawing_rev", "seq", "wps_id")
             if k in data}
+    if "wps_id" in vals:
+        vals["wps_id"] = vals["wps_id"] or None
     # išleistame maršrute keisti galima tik tai, kas srauto nekeičia
     if any(k in ("part_no", "qty_plan", "seq") and vals[k] != t[k] for k in vals) or \
             data.get("centre_id", t["centre_id"]) != t["centre_id"]:
@@ -186,6 +188,10 @@ def block_reason(con, t: dict) -> str | None:
         return "Laukiama detalių: " + ", ".join(f"{u['part_no']} ({u['centre_code']})" for u in waiting)
     if waiting:
         return f"Laukiama ankstesnės operacijos: {waiting[0]['centre_code']} · {waiting[0]['name']}"
+    # detalės padarytos, bet sulaikytos – laukia kokybės kontrolės
+    for u in routing.upstream(con, t, st):
+        if quality.pending(con, u["id"]):
+            return f"Laukiama kokybės kontrolės: {u['centre_code']} · {u['name']}"
     # į mazgą ateina mazgai, kurių jis laukia
     if routing.is_entry(con, t, st):
         req = con.execute("SELECT requires, project_id FROM assemblies WHERE id=?", (t["assembly_id"],)).fetchone()
@@ -231,7 +237,7 @@ def start(con, user, task_id) -> None:
         raise RuleError("Užduotis jau vykdoma")
     if t["status"] == "pristabdyta":
         raise RuleError("Užduotis pristabdyta – spauskite „Tęsti“")
-    why = block_reason(con, t)
+    why = block_reason(con, t) or quality.welder_lock(con, user, t)
     if why:
         raise RuleError(why)
     now = db.now()
@@ -302,6 +308,8 @@ def stop(con, user, task_id, good: int, scrap: int = 0, finish: bool | None = No
     good, scrap = int(good or 0), int(scrap or 0)
     if good < 0 or scrap < 0:
         raise RuleError("Kiekis negali būti neigiamas")
+    # savikontrolė ir medžiagos lydinys – prieš perduodant detales
+    quality.check_stop(con, user, {**t, **quality._task(con, task_id)}, good)
     now = db.now()
     con.execute("UPDATE intervals SET end=? WHERE task_id=? AND end IS NULL", (now, task_id))
     con.execute("UPDATE pauses SET end=? WHERE task_id=? AND end IS NULL", (now, task_id))
@@ -313,12 +321,15 @@ def stop(con, user, task_id, good: int, scrap: int = 0, finish: bool | None = No
                 (status, total_good, total_scrap, task_id))
     db.log_event(con, user["id"], "task", task_id, "stop",
                  {"good": good, "scrap": scrap, "status": status})
-    # geri vienetai iškart perduodami kitai srauto operacijai
-    nxt = routing.record_transfer(con, user["id"], t, good)
+    # geri vienetai perduodami kitai srauto operacijai – jei patikros užbaigtos;
+    # laukiant kokybės inžinieriaus detalės sulaikomos (`quality.release_transfers`)
+    nxt = routing.next_steps(con, t)
+    hold = quality.pending(con, task_id) if good > 0 else []
+    moved = 0 if hold else quality.release_transfers(con, user["id"], task_id)
     if status == "baigta":
         signals.on_stop(con, user["id"], t, _work_seconds(con, task_id), total_good + total_scrap)
     return {"status": status, "suggest_ncr": scrap > 0, "qty_good": total_good, "qty_scrap": total_scrap,
-            "moved": good, "next": nxt}
+            "moved": moved, "next": nxt, "held": [c["name"] for c in hold]}
 
 
 def ack_revision(con, user, task_id) -> None:
@@ -347,8 +358,9 @@ def _work_seconds(con, task_id, closed_only=False) -> float:
 
 # ---------- terminalo vaizdas ----------
 
-def terminal_view(con, centre: dict) -> dict:
-    """Viskas, ką rodo darbo centro terminalas."""
+def terminal_view(con, centre: dict, user: dict | None = None) -> dict:
+    """Viskas, ką rodo darbo centro terminalas. `user` – kad užraktas dėl
+    suvirintojo kvalifikacijos būtų rodomas tam, kuris prie terminalo."""
     now = db.now()
     tasks = _open_tasks(con, centre["id"])
     running = None
@@ -375,7 +387,7 @@ def terminal_view(con, centre: dict) -> dict:
         if not t["approved"]:
             unapproved += 1
             continue
-        t["lock"] = block_reason(con, t)
+        t["lock"] = block_reason(con, t) or (quality.welder_lock(con, user, t) if user else None)
         queue.append(t)
     done = db.rows(con.execute(
         "SELECT t.id, t.name, t.qty_good, t.qty_scrap, a.code AS assembly_code, p.code AS project_code "
@@ -393,6 +405,14 @@ def _flow(con, t) -> None:
     ir technologo failai, su kuriais dirbti."""
     t["files"] = ncfiles.list_for(con, [t["id"]])[t["id"]]
     t["files_pending"] = any(f["needs_ack"] for f in t["files"])
+    q = quality._task(con, t["id"])
+    t["checks"] = quality.checks_for(con, [t["id"]])[t["id"]]
+    t["materials"] = quality.materials_for(con, [t["id"]])[t["id"]]
+    t["needs_material"] = quality.requires_material(q)
+    t["exc_class"] = q["exc_class"]
+    t["held"] = [c["name"] for c in quality.held(con, t["id"])]
+    if q["wps_id"]:
+        t["wps"] = db.row(con.execute("SELECT code, process, material_group FROM wps WHERE id=?", (q["wps_id"],)))
     st = routing.structure(con, t["assembly_id"])
     ups = routing.upstream(con, t, st)
     t["from"] = [{"centre_code": u["centre_code"], "name": u["name"], "part_no": u["part_no"],

@@ -452,3 +452,29 @@ table.tedit input:disabled, table.tedit select:disabled { background: transparen
 @keyframes led { 50% { opacity: .35; } }
 @keyframes blink { to { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .fc.st-dirba .led, .falert { animation: none; } }
+
+/* kokybė: patikros (✓ ✗ ○ ≈), terminalo kokybės skydelis, dosjė */
+.qcell { min-width: 210px; }
+.qchk { display: grid; grid-template-columns: 14px 1fr auto; gap: 5px; align-items: baseline; font-size: 13px; margin-bottom: 3px; }
+table.tedit td.mono, table.tedit td .mono { white-space: nowrap; }
+.tag { font-size: 10.5px; font-weight: 600; padding: 0 5px; border-radius: 2px; border: 1px solid var(--line); color: var(--muted); }
+.tag.qc { border-color: var(--accent); color: var(--accent); }
+.wpsl { display: flex; gap: 6px; align-items: center; margin: 3px 0; font-size: 12px; }
+.wpsl select { font-size: 12px; padding: 2px 4px; }
+.tq { display: grid; gap: 6px; border-top: 1px solid #2c3844; padding-top: 8px; }
+.tqrow { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 3px; background: #1f2a35; }
+.tqrow.ok, .tqrow.isimtis { opacity: .75; }
+.tqrow.nok { box-shadow: inset 4px 0 0 #f08a7e; }
+.tqi { font-size: 22px; text-align: center; }
+.tqrow.ok .tqi { color: #7fd29a; } .tqrow.nok .tqi { color: #f08a7e; }
+.tqa { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: end; }
+.tqa button { font-size: 17px; padding: 10px 16px; border: 0; color: #fff; }
+.tqa button.ghost { color: #cfd8e1; border: 1px solid #3c4a58; font-size: 14px; padding: 8px 10px; }
+.tqv { width: 110px; font-size: 20px; padding: 8px; text-align: center; }
+.ltlist { display: grid; gap: 4px; max-height: 50vh; overflow: auto; }
+.lt { display: grid; text-align: left; gap: 2px; padding: 8px 10px; }
+.dossier { display: grid; gap: 14px; }
+.ncr8 { border-top: 1px solid var(--line-soft); padding: 8px 0; display: grid; gap: 3px; }
+.ncr8:first-of-type { border-top: 0; }
+@media (max-width: 640px) { .tqrow { grid-template-columns: 24px 1fr; } .tqa { grid-column: 1 / -1; justify-content: start; } }
+@media print { .dossier .card { break-inside: avoid; } }

@@ -429,6 +429,114 @@ MIGRATIONS: list[str] = [
     ALTER TABLE areas ADD COLUMN layout TEXT;
     ALTER TABLE work_centres ADD COLUMN layout TEXT;
     """,
+    # 12 – kokybė pagal EN 1090 / ISO 3834: patikros maršrute, medžiagų
+    # sertifikatai ir lydiniai, suvirintojų kvalifikacijos ir WPS, NCR 8D
+    """
+    ALTER TABLE projects ADD COLUMN exc_class TEXT NOT NULL DEFAULT '';   -- '', EXC1…EXC4
+    ALTER TABLE tasks ADD COLUMN wps_id INTEGER REFERENCES wps(id);
+    CREATE TABLE check_templates (
+        id INTEGER PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'check',     -- check (OK / NOK) / measure (skaičius su tolerancija)
+        unit TEXT NOT NULL DEFAULT '',
+        nominal REAL, tol_minus REAL, tol_plus REAL,
+        performer TEXT NOT NULL DEFAULT 'operator',   -- operator – savikontrolė / qc – kokybės kontrolė
+        instruction TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE task_checks (
+        id INTEGER PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES tasks(id),
+        template_id INTEGER REFERENCES check_templates(id),
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'check',
+        unit TEXT NOT NULL DEFAULT '',
+        nominal REAL, tol_minus REAL, tol_plus REAL,
+        performer TEXT NOT NULL DEFAULT 'operator',
+        instruction TEXT NOT NULL DEFAULT '',
+        sort INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'laukia',  -- laukia / ok / nok / isimtis
+        value REAL,
+        done_by INTEGER REFERENCES users(id),
+        done_at TEXT,
+        ncr_id INTEGER REFERENCES ncr(id),
+        waiver_reason TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX ix_task_checks ON task_checks (task_id);
+    -- kiekvienas matavimas atskirai: pakartotinis po taisymo neištrina pirmojo
+    CREATE TABLE check_results (
+        id INTEGER PRIMARY KEY,
+        check_id INTEGER NOT NULL REFERENCES task_checks(id),
+        ok INTEGER NOT NULL,
+        value REAL,
+        note TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT 'result',    -- result / waiver
+        user_id INTEGER REFERENCES users(id),
+        at TEXT NOT NULL
+    );
+    CREATE TABLE material_lots (
+        id INTEGER PRIMARY KEY,
+        heat_no TEXT NOT NULL,                  -- lydinio numeris (iš sertifikato)
+        material TEXT NOT NULL,                 -- pvz. S355J2+N, AISI 304
+        product TEXT NOT NULL DEFAULT '',       -- lakštas t10 3000×1500, vamzdis 60×5 …
+        supplier TEXT NOT NULL DEFAULT '',
+        cert_no TEXT NOT NULL DEFAULT '',
+        cert_type TEXT NOT NULL DEFAULT '3.1',  -- EN 10204: 2.2 / 3.1 / 3.2
+        cert_file TEXT,
+        qty REAL NOT NULL DEFAULT 0,
+        unit TEXT NOT NULL DEFAULT 'vnt',
+        status TEXT NOT NULL DEFAULT 'tinkama', -- tinkama / blokuota
+        note TEXT NOT NULL DEFAULT '',
+        received_at TEXT NOT NULL,
+        received_by INTEGER REFERENCES users(id),
+        UNIQUE (heat_no, material, product)
+    );
+    CREATE TABLE task_materials (
+        id INTEGER PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES tasks(id),
+        lot_id INTEGER NOT NULL REFERENCES material_lots(id),
+        qty REAL NOT NULL DEFAULT 1,
+        user_id INTEGER REFERENCES users(id),
+        at TEXT NOT NULL
+    );
+    CREATE INDEX ix_task_materials ON task_materials (task_id);
+    CREATE TABLE wps (
+        id INTEGER PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        process TEXT NOT NULL,                  -- ISO 4063: 135, 141, 111, 136 …
+        material_group TEXT NOT NULL,           -- ISO/TR 15608: 1.1, 1.2, 8.1 …
+        description TEXT NOT NULL DEFAULT '',
+        file TEXT,
+        active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE qualifications (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        standard TEXT NOT NULL DEFAULT 'ISO 9606-1',
+        process TEXT NOT NULL,
+        material_group TEXT NOT NULL,
+        cert_no TEXT NOT NULL DEFAULT '',
+        valid_until TEXT NOT NULL,
+        file TEXT,
+        note TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1
+    );
+    ALTER TABLE ncr ADD COLUMN containment TEXT NOT NULL DEFAULT '';   -- D3 laikini veiksmai
+    ALTER TABLE ncr ADD COLUMN root_cause TEXT NOT NULL DEFAULT '';    -- D4 šakninė priežastis
+    ALTER TABLE ncr ADD COLUMN corrective TEXT NOT NULL DEFAULT '';    -- D5–D6 korekciniai veiksmai
+    ALTER TABLE ncr ADD COLUMN preventive TEXT NOT NULL DEFAULT '';    -- D7 kad nepasikartotų
+    ALTER TABLE ncr ADD COLUMN disposition TEXT NOT NULL DEFAULT '';   -- sprendimas dėl gaminio
+    ALTER TABLE ncr ADD COLUMN check_id INTEGER REFERENCES task_checks(id);
+    CREATE TABLE ncr_files (
+        id INTEGER PRIMARY KEY,
+        ncr_id INTEGER NOT NULL REFERENCES ncr(id),
+        name TEXT NOT NULL,
+        stored TEXT NOT NULL,
+        user_id INTEGER REFERENCES users(id),
+        at TEXT NOT NULL
+    );
+    """,
 ]
 
 

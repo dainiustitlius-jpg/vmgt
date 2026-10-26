@@ -73,6 +73,7 @@ pagrindiniai pavyzdžiai. Testai (`sample_client`) – be demo; `test_demo.py` �
 | `services/routing.py` | Technologinis srautas: detalių atšakos → mazgas, kur keliauti toliau, išleidimas į gamybą, perdavimai, atsekamumas, technologo darbų sąrašas, maršruto kopijavimas |
 | `services/ncfiles.py` | Technologo failai prie operacijų (DXF, NC, robotų, PLC): katalogai, versijos, meistro patvirtinimas |
 | `services/ncr.py` | Neatitiktys: atvira → priskirta → uzdaryta |
+| `services/quality.py` | Kokybė (EN 1090 / ISO 3834): patikros maršrute, lydiniai ir sertifikatai, WPS ir kvalifikacijos, NCR 8D, dosjė |
 | `services/drawings.py` | PDF brėžiniai su revizija (vėliau – iš PDM) |
 | `services/importer.py` | Maršrutų CSV importas (vėliau – D365 / PDM) |
 | `services/components.py` | Komponentų pirkimai: eilutės, gavimai, CSV importas iš ERP eksporto, tiekėjų patikimumas |
@@ -110,7 +111,9 @@ Pradėti galima, jei:
 5. įėjimo operacija (pirmoji mazgo, o jei jų nėra – atšakų pirmosios) – visi
    `requires` mazgai baigti;
 6. brėžinio revizija nepasikeitė; pasikeitus – meistras patvirtina
-   (`ack_revision`, teisė `ack_rev`).
+   (`ack_revision`, teisė `ack_rev`);
+7. ankstesnės operacijos detalės nesulaikytos kokybės kontrolei, o suvirinimui
+   su WPS – prisijungęs suvirintojas turi galiojančią kvalifikaciją (žr. „Kokybė“).
 
 Pauzė – tik su priežastimi (`PAUSE_REASONS`), „Kita“ – su pastaba. Stop
 įrašo kiekį: gera + brokas ≥ planas → baigta, kitaip lieka eilėje savo
@@ -170,6 +173,34 @@ aplinka visam technologiniam keliui. Sprendimai: **VMGT tvarko katalogus pati**,
 `test_failai.py`. Pavyzdžiuose P-24121 200 lenkimui failo sąmoningai nėra
 (išleidimas rodo klaidą), P-24121 100 plazmos programa pakeista po išleidimo
 (PLZ-01 laukia meistro).
+
+## Kokybė pagal EN 1090 / ISO 3834 (nuo 2026-10-26)
+
+Vartotojo sprendimai: diegiamos **visos keturios dalys** (patikros maršrute,
+medžiagų sertifikatai ir lydiniai, suvirintojų kvalifikacijos / WPS, dosjė ir
+NCR 8D); taisyklės **griežtos**; patikrą atlieka **tas, kurį nurodė
+technologas** (operatorius – savikontrolė terminale, arba kokybės
+inžinierius – kokybės eilė). `services/quality.py`, migracija 12, teisė
+`quality` (kokybe, admin). Langas „Kokybė“ (`#/kokybe/<kontrole|medziagos|
+suvirinimas|sablonai|dosje>`), dosjė – `#/dosje/<projekto id>`.
+
+| | |
+|---|---|
+| vykdymo klasė | `projects.exc_class` (EN 1090-2: EXC1–EXC4), projekto „Planas“ kortelėje. Nuo **EXC2** (`TRACE_FROM`): pjovimo operacijai privalomas lydinys, suvirinimo – WPS (išleidimo klaida `quality.route_check`, be kokybės inžinieriaus patikros – įspėjimas) |
+| patikros | šablonai `check_templates` (OK/NOK arba matavimas su tolerancija, atlieka operator / qc); technologas redaktoriuje – stulpelis „Kokybė“: „+ Patikra“, WPS suvirinimui. Kiekvienas rezultatas – `check_results` (pakartotinis neištrina ankstesnio). Matavimui OK skaičiuojamas iš tolerancijos; kablelis priimamas (įvedimo laukai – tekstiniai su `inputmode=decimal`, nes `type=number` kablelio nepriima – rasta Playwright) |
+| griežtumas | Stop su gerais: operatoriaus patikros ir (EXC2+ pjovimui) lydinys – privalomi (`check_stop`). Liko qc patikra – kiekis įrašomas, bet detalės **sulaikomos**: perdavimas – tik užbaigus (`release_transfers`, tik skirtumas – nedubliuoja), kita operacija užrakinta („Laukiama kokybės kontrolės“, `block_reason`). NOK → automatinė neatitiktis (`ncr.check_id`), patikra atvira iki OK ar išimties. Išimtis (`waive`) – meistras (`ack_rev`) ar kokybė, su priežastimi. Išleistame maršrute patikros nepašalinamos |
+| medžiagos | `material_lots`: lydinys, medžiaga, gaminys, tiekėjas, sertifikatas EN 10204 (2.2/3.1/3.2, PDF `files/sertifikatai/`), būsena tinkama / blokuota (su priežastimi – blokuoto naudoti negalima). Registruoja sandėlis (`receive`) ar kokybė. Terminale „Nurodyti lydinį“ – paieška → `task_materials` |
+| suvirinimas | `wps` (procesas ISO 4063, grupė ISO/TR 15608), `qualifications` (ISO 9606-1, galioja iki, PDF). Start: suvirinimo operacijai su WPS – prisijungęs turi galiojančią kvalifikaciją tam procesui ir grupei (`welder_lock`, terminale – užraktas tam, kas prisijungęs). Išimties nėra – tai teisinis reikalavimas |
+| NCR 8D | `ncr` + D3 laikini veiksmai, D4 šakninė priežastis, D5–6 korekciniai, D7 prevenciniai, sprendimas dėl gaminio (`DISPOSITIONS`), nuotraukos `ncr_files`. Uždarant per API – šakninė priežastis ir sprendimas dėl gaminio privalomi |
+| dosjė | `quality.dossier`: medžiagų atsekamumas (detalė → lydinys → sertifikatas), suvirinimo žurnalas (kas, kada, WPS, kvalifikacija), patikrų protokolas, neatitiktys 8D, „Ko trūksta“; spausdinimui / PDF; `dossier_zip` – sertifikatai, kvalifikacijos, WPS, NCR nuotraukos + `turinys.csv` |
+
+Pavyzdžiai (`seed._quality`, kuriami PO istorijos, praeities lydiniai ir WPS –
+atgaline data kaip iš žurnalų): 7 šablonai, 3 WPS, kvalifikacijos (`suv1`
+galioja, 141/8.1 baigiasi po 20 d.; `op3` – pasibaigusi), 7 lydiniai
+(H-60014 blokuotas – P-24108 istorija), klasės (P-24108 EXC3, P-24113 EXC1,
+kiti EXC2), patikros laukiančioms operacijoms; P-24108 dažytas rėmas
+**sulaikytas** kokybės eilėje (dangos storis). Demo NCR – su 8D.
+`test_kokybe.py`.
 
 ## Planavimas ir pokyčių signalai (nuo 2026-10-26)
 
@@ -364,7 +395,6 @@ kategoriją.
 - Lantek lakšto kaip atskiros užduoties su detalėmis iš kelių projektų.
 - Etapų priklausomybių (pabaiga → pradžia, poslinkis) – kol kas tik mazgų
   `requires` ir maršruto eilė.
-- Kokybės patikrų šablonų ir protokolų, nuotraukų prie neatitikčių.
 - Patvirtintos eilės kopijos: planuotojo perrikiavimas matomas terminale iš
   karto (PrefabFlow laikė patvirtintą tvarką atskirai).
 - MS SQL – schema paprasta, kad perkelti būtų nesunku.

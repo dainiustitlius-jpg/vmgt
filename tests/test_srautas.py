@@ -144,6 +144,12 @@ def test_api(sample_client):
     assert rel.status_code == 409 and "nepridėtas programos" in rel.json()["detail"]
     lnk = next(o for o in r["branches"][1]["ops"] if o["centre_code"] == "LNK-01")
     assert c.post(f"/api/tasks/{lnk['id']}/files", files={"file": ("2210-202.nc", b"M30\n")}).status_code == 200
+    # P-24121 – EXC2: suvirinimui reikia WPS
+    rel = c.post(f"/api/route/{a['id']}/release")
+    assert rel.status_code == 409 and "nenurodytas WPS" in rel.json()["detail"]
+    wps = c.get("/api/quality/wps").json()[0]["id"]
+    sv = next(o for o in r["main"]["ops"] if o["centre_code"] == "SV-03")
+    assert c.put(f"/api/tasks/{sv['id']}", json={"wps_id": wps}).status_code == 200
     assert c.post(f"/api/route/{a['id']}/release").status_code == 200
     assert c.get(f"/api/route/{a['id']}").json()["released"]
     assert c.get("/api/qr", params={"data": "http://x/#/r/1"}).text.startswith("<svg")

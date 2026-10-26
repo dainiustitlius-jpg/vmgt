@@ -49,9 +49,12 @@ def O(part, seq, centre, name, qty, norm, **x):
     return {"part": part, "seq": seq, "centre": centre, "name": name, "qty": qty, "norm": norm, **x}
 
 
-def NCR(category, description, resolution=None, close_days=2, assignee="kokybe", qty=0):
+def NCR(category, description, resolution=None, close_days=2, assignee="kokybe", qty=0, root="", disp="",
+        containment="", preventive=""):
+    """Neatitiktis su 8D: šakninė priežastis, sprendimas dėl gaminio (`quality.DISPOSITIONS`)."""
     return {"category": category, "description": description, "resolution": resolution,
-            "close_days": close_days, "assignee": assignee, "qty": qty}
+            "close_days": close_days, "assignee": assignee, "qty": qty, "root": root, "disp": disp,
+            "containment": containment, "preventive": preventive}
 
 
 def A(code, name, qty, drawing, start, ops, requires="", release=True):
@@ -77,12 +80,16 @@ PROJECTS = [
                 O("", 30, "SV-04", "Rėmo surinkimas ir suvirinimas", 1, 720, factor=1.25,
                   ncr=NCR("suvirinimas", "Po suvirinimo rėmo įstrižainių skirtumas 6 mm (leistina 3 mm).",
                           "Rėmas ištiesintas presu, pakartotinai išmatuota – 2 mm. Technologijoje pridėtas "
-                          "laikinas standumo statramstis suvirinimo metu.", 2)),
+                          "laikinas standumo statramstis suvirinimo metu.", 2,
+                          root="Suvirinimo seka: ilgosios siūlės virintos iš vienos pusės, rėmas nefiksuotas", disp="remontuoti",
+                          containment="Rėmas sulaikytas prieš smėliavimą", preventive="Suvirinimo seka ir statramstis įrašyti į technologinę kortelę")),
                 O("", 40, "SML-01", "Smėliavimas Sa 2,5", 1, 90),
                 O("", 50, "DAZ-02", "Miltelinis dažymas RAL 7016", 1, 120,
                   pauses=[(0.9, "kokybe", "Laukiama dangos storio matavimo", 90)],
                   ncr=NCR("pavirsius", "Dangos storis 45 µm dviejose zonose (reikia ≥ 60 µm).",
-                          "Zonos perdažytos, išmatuota 70–85 µm. Dažymo kameroje pakeistas pistoleto antgalis.", 1)),
+                          "Zonos perdažytos, išmatuota 70–85 µm. Dažymo kameroje pakeistas pistoleto antgalis.", 1,
+                          root="Nusidėvėjęs pistoleto antgalis – nevienodas purškimas", disp="perdaryti",
+                          preventive="Antgalio patikra kiekvienos pamainos pradžioje")),
             ]),
             A("200", "Griebtuvas", 1, "2495-200", 20, [
                 O("2495-201", 10, "LAZ-01", "Griebtuvo pirštų pjovimas", 6, 5),
@@ -102,7 +109,9 @@ PROJECTS = [
                 O("", 40, "TST-01", "FAT su užsakovu", 1, 480, factor=1.6,
                   ncr=NCR("kita", "FAT metu saugos skenerio apsaugos zona per maža – robotas sustoja per vėlai.",
                           "PLC ir skenerio zonos perprogramuotos, pakartotas saugos testas – atitinka PL d. "
-                          "Užsakovas FAT pasirašė.", 1, "technologas")),
+                          "Užsakovas FAT pasirašė.", 1, "technologas",
+                          root="Skenerio zona sukonfigūruota pagal seną celės išdėstymą", disp="perdaryti",
+                          preventive="Saugos zonų patikra įtraukta į vidinį bandymą prieš FAT")),
             ], requires="100,200,300"),
         ],
         "phases": [
@@ -166,7 +175,9 @@ PROJECTS = [
                 O("2513-201", 10, "TEK-02", "Ratų tekinimas", 24, 18, scrap=2,
                   ncr=NCR("matmenys", "2 ratų guolio lizdas Ø52,08 mm (reikia Ø52 H7) – guolis įeina laisvai.",
                           "Pagaminti 2 nauji ratai. Pakeista tekinimo peilio plokštelė, įvesta pirmos detalės "
-                          "patikra kalibru.", 2, qty=2)),
+                          "patikra kalibru.", 2, qty=2,
+                          root="Nusidėvėjusi peilio plokštelė, matuota slankmačiu, ne kalibru", disp="brokas",
+                          preventive="Pirmos detalės patikra kalibru, plokštelės keitimo intervalas")),
                 O("2513-202", 10, "LAZ-01", "Platformų pjovimas", 6, 10),
                 O("2513-202", 20, "LNK-01", "Platformų lenkimas", 6, 12),
                 O("", 30, "SV-07", "Vežimėlio suvirinimas", 6, 120),
@@ -237,7 +248,9 @@ PROJECTS = [
                   pauses=[(0.15, "kokybe", "Pirmo lakšto kampas 92° – laukiama technologo", 60)],
                   ncr=NCR("lenkimas", "Lenkimo kampas 92° vietoj 90° – lovys nesusiveda su galiniu flanšu.",
                           "Lakštai perlenkti. Lenkimo programa pataisyta (v2, kompensacija +2°), "
-                          "patvirtinta meistro.", 1, "technologas")),
+                          "patvirtinta meistro.", 1, "technologas",
+                          root="Lenkimo programoje neįvertinta S235 t5 atšoka", disp="perdaryti",
+                          preventive="Atšokos lentelė medžiagoms įtraukta į lenkimo programų šabloną")),
                 O("2502-102", 10, "PLZ-01", "Flanšų pjovimas t10", 8, 6),
                 O("", 30, "SV-08", "Lovio suvirinimas", 2, 360),
                 O("", 40, "SML-01", "Smėliavimas", 2, 60),
@@ -246,7 +259,9 @@ PROJECTS = [
             A("200", "Sraigtas", 2, "2502-200", 15, [
                 O("2502-201", 10, "TEK-01", "Veleno tekinimas Ø50", 2, 240, scrap=1,
                   ncr=NCR("matmenys", "Veleno guolio kaklelis Ø49,95 mm (reikia Ø50 k6) – per mažas.",
-                          "Pagamintas naujas velenas. Kaklelis matuojamas mikrometru prieš nuimant detalę.", 2, qty=1)),
+                          "Pagamintas naujas velenas. Kaklelis matuojamas mikrometru prieš nuimant detalę.", 2, qty=1,
+                          root="Matuota tik nuėmus detalę nuo staklių – nebegalima pataisyti", disp="brokas",
+                          preventive="Kritiniai skersmenys matuojami prieš nuimant detalę")),
                 O("2502-201", 20, "MECH-01", "Raktinių griovelių frezavimas", 2, 60),
                 O("2502-202", 10, "PLZ-01", "Spiralės segmentų pjovimas", 40, 3),
                 O("2502-202", 20, "LNK-01", "Segmentų formavimas", 40, 6),
@@ -303,12 +318,16 @@ PROJECTS = [
                   pauses=[(0.3, "gedimas", "Plazmos degiklio antgalio keitimas", 40)],
                   ncr=NCR("medziaga", "Lakšto t40 sertifikatas 3.1: S235JR vietoj S355J2. Pirmos 2 plokštės išpjautos.",
                           "Partija grąžinta tiekėjui, gautas S355J2 su 3.1 sertifikatu, plokštės išpjautos iš naujo. "
-                          "Gaunant lakštus tikrinamas sertifikatas.", 3, qty=2)),
+                          "Gaunant lakštus tikrinamas sertifikatas.", 3, qty=2,
+                          root="Gaunant metalą sertifikatas nebuvo lyginamas su užsakymu", disp="grazinti",
+                          containment="Lydinys H-60014 blokuotas", preventive="Lydinys registruojamas su sertifikatu – tikrinama gaunant")),
                 O("2508-101", 20, "MECH-01", "Plokščių frezavimas", 2, 240,
                   ncr=NCR("brezinys", "Brėžinyje 2508-100 rev. A skylių ašių atstumas 860 mm nesutampa su "
                                       "hidrocilindro tvirtinimu (850 mm).",
                           "Išleista rev. B, frezavimo programa pataisyta, patikrinta su cilindro brėžiniu.", 2,
-                          "technologas")),
+                          "technologas",
+                          root="Cilindro tiekėjo brėžinys pasikeitė po projektavimo", disp="naudoti",
+                          preventive="Pirktinių mazgų matmenys tikrinami pagal galutinį tiekėjo brėžinį")),
                 O("2508-102", 10, "PLZ-01", "Skersinių pjovimas t30", 3, 30),
                 O("2508-102", 20, "MECH-01", "Skersinių frezavimas", 3, 150),
                 O("", 30, "SV-10", "Rėmo suvirinimas", 1, 1800),
@@ -767,6 +786,8 @@ def _ncr(sim: Sim, o, reporter):
         close_at = (now + timedelta(days=n["close_days"])).replace(hour=11, minute=30)
         if close_at <= sim.today:
             sim.at(close_at)
+            con.execute("UPDATE ncr SET containment=?, root_cause=?, corrective=?, preventive=?, disposition=? WHERE id=?",
+                        (n["containment"], n["root"], n["resolution"], n["preventive"], n["disp"], nid))
             ncr.close(con, U("kokybe"), nid, n["resolution"])
     sim.at(now)
 

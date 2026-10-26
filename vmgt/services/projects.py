@@ -94,8 +94,10 @@ def get_project(con, project_id) -> dict:
 
 
 def save_project(con, by, data: dict, project_id=None) -> int:
-    fields = ("code", "name", "customer", "due_date", "priority", "status", "manager_id", "ext_ref", "notes")
+    fields = ("code", "name", "customer", "due_date", "priority", "status", "manager_id", "ext_ref", "notes", "exc_class")
     vals = {k: data.get(k) for k in fields if k in data}
+    if "exc_class" in vals and (vals["exc_class"] or "") not in ("", "EXC1", "EXC2", "EXC3", "EXC4"):
+        raise RuleError("Vykdymo klasė pagal EN 1090-2: EXC1–EXC4 arba jokia")
     if "status" in vals and vals["status"] not in PROJECT_LABEL:
         raise RuleError("Nežinoma projekto būsena")
     if project_id is None:

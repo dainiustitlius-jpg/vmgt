@@ -30,6 +30,7 @@ PERMS = {
     "docs": "Įkelti brėžinius",
     "ncr_report": "Registruoti neatitiktis",
     "ncr_manage": "Priskirti ir uždaryti neatitiktis",
+    "quality": "Kokybė: kontrolės patikros, išimtys, sertifikatai, kvalifikacijos, WPS, dosjė",
     "purchase": "Komponentų pirkimai: eilutės, importas",
     "receive": "Registruoti komponentų gavimą",
     "actions": "Kurti projekto užduotis ir keisti visų užduotis",
@@ -47,7 +48,7 @@ ROLES = {
     "technologas": ("Technologas", {"view", "tasks", "release", "docs", "ncr_report", "actions"}),
     "meistras": ("Meistras", {"view", "plan", "execute", "ack_rev", "ncr_report", "receive", "actions"}),
     "operatorius": ("Operatorius", {"execute", "ncr_report"}),
-    "kokybe": ("Kokybės inžinierius", {"view", "ncr_report", "ncr_manage", "actions"}),
+    "kokybe": ("Kokybės inžinierius", {"view", "ncr_report", "ncr_manage", "quality", "actions"}),
     "perziura": ("Peržiūra", {"view"}),
 }
 

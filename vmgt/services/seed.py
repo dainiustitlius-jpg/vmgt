@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import db
-from . import actions, auth, capacity, components, demo, drawings, meetings, ncfiles, projects, routing, tasks
+from . import actions, auth, capacity, components, demo, drawings, meetings, ncfiles, projects, quality, routing, tasks
 
 TEST_PASSWORD = "vmgt2026"
 
@@ -384,6 +384,107 @@ def seed(con, files_dir: Path, today: datetime | None = None, nc_dir: Path | Non
         at(today - timedelta(hours=3))
         ncfiles.save(con, nc_dir, tech, plz, "2210-101_stulpas.dxf", _dxf("2210-101 stulpas, skyles D13", 60, 1800),
                      "Pakeistas tvirtinimo skylių skersmuo")
+        _quality(con, uid, files_dir, today, at)
     finally:
         db.set_clock(real_clock)
     con.commit()
+
+
+def _quality(con, uid, files_dir, today, at) -> None:
+    """Kokybė (EN 1090): šablonai, WPS, kvalifikacijos, lydiniai su sertifikatais,
+    vykdymo klasės ir patikros. Kuriama PO istorijos: praeities darbai buvo
+    atlikti be šių taisyklių, o jų medžiagos ir WPS įrašomi atgaline data –
+    kaip įvedus duomenis iš popierinių žurnalų."""
+    U = lambda login: db.row(con.execute("SELECT * FROM users WHERE login=?", (login,)))
+    kok, tech = U("kokybe"), uid["technologas"]
+    pdf = lambda *lines: drawings.sample_pdf(["PAVYZDYS", *lines])
+    at(today - timedelta(days=120))
+    tpl = {}
+    for code, name, kind, nom, lo, hi, unit, perf, instr in [
+            ("VT-SIUL", "Suvirinimo siūlių vizuali kontrolė (EN ISO 5817 C)", "check", None, None, None, "", "qc",
+             "100 % siūlių, EN ISO 17637; porų, įtrūkimų, nepravirinimų nėra"),
+            ("PJV-KOK", "Pjūvio kokybė (EN ISO 9013)", "check", None, None, None, "", "operator",
+             "Šlakas, kraštų nuožula, oksidacija – lyginti su pavyzdžiu"),
+            ("LNK-KAMP", "Lenkimo kampas", "measure", 90, 1, 1, "°", "operator", "Kampamačiu, pirma ir paskutinė detalė"),
+            ("MAT-ISTR", "Įstrižainių skirtumas", "measure", 0, 0, 3, "mm", "operator", "Matuoti ruletė, po suvirinimo"),
+            ("TEK-D40", "Veleno skersmuo Ø40 h7", "measure", 40, 0.025, 0, "mm", "operator", "Mikrometru, prieš nuimant detalę"),
+            ("DAZ-STOR", "Dangos storis", "measure", 80, 0, 40, "µm", "qc", "Storio matuokliu, 5 vietos, mažiausia reikšmė"),
+            ("FAT", "Funkcinis bandymas pagal FAT programą", "check", None, None, None, "", "qc", "Užsakovo dalyvavimas")]:
+        tpl[code] = quality.save_template(con, tech, {"code": code, "name": name, "kind": kind, "nominal": nom,
+                                                      "tol_minus": lo, "tol_plus": hi, "unit": unit, "performer": perf,
+                                                      "instruction": instr})
+    wps = {}
+    for code, proc, grp, desc in [("WPS-135-01", "135", "1.1", "MAG, S235–S355 lakštai ir profiliai, t 3–20"),
+                                  ("WPS-135-02", "135", "1.2", "MAG, S355 storasieniai t 20–60, pašildymas 100 °C"),
+                                  ("WPS-141-01", "141", "8.1", "TIG, AISI 304/316, maisto pramonė, apsauga iš vidaus")]:
+        wps[code] = quality.save_wps(con, files_dir, tech, {"code": code, "process": proc, "material_group": grp,
+                                                            "description": desc}, pdf(code, desc))
+    plus = lambda n: (today + timedelta(days=n)).date().isoformat()
+    for login, proc, grp, valid, cert in [("suv1", "135", "1.1", 300, "LT-9606-1123"), ("suv1", "135", "1.2", 300, "LT-9606-1124"),
+                                          ("suv1", "141", "8.1", 20, "LT-9606-1187"), ("op3", "135", "1.1", -15, "LT-9606-0871"),
+                                          ("op3", "135", "1.2", -15, "LT-9606-0872")]:
+        if login not in uid:                     # demo operatoriai kuriami tik su demo projektais
+            continue
+        quality.save_qualification(con, files_dir, uid["admin"], {
+            "user_id": uid[login], "process": proc, "material_group": grp, "valid_until": plus(valid),
+            "standard": "ISO 9606-1", "cert_no": cert}, pdf("ISO 9606-1", cert, f"{proc} {grp}"))
+    lots = {}
+    for heat, mat, prod, sup, cert in [("H-48213", "S355J2+N", "lakštas t10 3000×1500", "UAB Metalo prekyba", "MP-26-3311"),
+                                       ("H-55190", "S355J2+N", "lakštas t6 3000×1500", "UAB Metalo prekyba", "MP-26-3312"),
+                                       ("H-77102", "S235JR", "lakštas t3 2500×1250", "UAB Metalo prekyba", "MP-26-3290"),
+                                       ("H-31877", "S235JR", "vamzdis 100×100×5", "UAB Profiliai", "PR-8812"),
+                                       ("H-62440", "S355J2+N", "lakštas t40 2000×1000", "UAB Metalo prekyba", "MP-26-3420"),
+                                       ("H-90311", "AISI 304", "lakštas t4 2000×1000", "UAB Nerūdijantis", "NR-5521"),
+                                       ("H-60014", "S235JR", "lakštas t40 2000×1000", "UAB Metalo prekyba", "MP-26-3401")]:
+        lots[heat] = quality.save_lot(con, files_dir, kok, {"heat_no": heat, "material": mat, "product": prod,
+                                                            "supplier": f"{sup} (PAVYZDYS)", "cert_no": cert, "cert_type": "3.1",
+                                                            "qty": 10, "unit": "vnt"}, pdf("EN 10204 3.1", cert, heat, mat, prod))
+    # P-24108 istorija: sertifikatas neatitiko užsakymo (S235 vietoj S355)
+    quality.set_lot_status(con, kok, lots["H-60014"], "blokuota", "Sertifikate S235JR, užsakyta S355J2 – grąžinta tiekėjui")
+
+    exc = {"P-24117": "EXC2", "P-24121": "EXC2", "P-24095": "EXC2", "P-24102": "EXC2", "P-24108": "EXC3",
+           "P-24113": "EXC1", "P-24126": "EXC2"}
+    for code, cls in exc.items():
+        con.execute("UPDATE projects SET exc_class=? WHERE code=?", (cls, code))
+    task = lambda code, name: con.execute(
+        "SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE p.code=? AND t.name=?", (code, name)).fetchone()
+    # praeities pjovimas ir suvirinimas – atgaline data, kaip įvesta iš žurnalų
+    for t in db.rows(con.execute(
+            "SELECT t.id, p.code, p.exc_class, c.kind, t.name, (SELECT MAX(end) FROM intervals i WHERE i.task_id=t.id) AS ended "
+            "FROM tasks t JOIN projects p ON p.id=t.project_id JOIN work_centres c ON c.id=t.centre_id "
+            "WHERE t.qty_good > 0")):
+        if not quality.traced(t["exc_class"]):
+            continue
+        if t["kind"] == "pjovimas":
+            heat = ("H-90311" if t["code"] == "P-24126" else "H-31877" if "Profil" in t["name"] or "Bėgių" in t["name"]
+                    else "H-62440" if "t40" in t["name"] or "t30" in t["name"] or "t60" in t["name"]
+                    else "H-77102" if "S235" in t["name"] else "H-48213" if "t10" in t["name"] else "H-55190")
+            con.execute("INSERT INTO task_materials (task_id, lot_id, qty, user_id, at) VALUES (?,?,1,?,?)",
+                        (t["id"], lots[heat], uid["op1"], t["ended"] or db.now()))
+        if t["kind"] == "suvirinimas":
+            w = "WPS-141-01" if t["code"] == "P-24126" else "WPS-135-02" if t["code"] == "P-24108" else "WPS-135-01"
+            con.execute("UPDATE tasks SET wps_id=? WHERE id=?", (wps[w], t["id"]))
+    # dabartiniai darbai: WPS ir patikros, kurias matys terminalas ir kokybės eilė
+    at(today - timedelta(hours=6))
+    for code, name, wps_code, checks in [
+            ("P-24117", "Konvejerio rėmo suvirinimas", "WPS-135-01", ["VT-SIUL", "MAT-ISTR"]),
+            ("P-24117", "Šonų lenkimas", None, ["LNK-KAMP"]),
+            ("P-24117", "Velenų tekinimas", None, ["TEK-D40"]),
+            ("P-24117", "Miltelinis dažymas RAL 5010", None, ["DAZ-STOR"]),
+            ("P-24117", "Funkcinis testas, FAT", None, ["FAT"]),
+            ("P-24121", "Tvoros sekcijų suvirinimas", "WPS-135-01", ["VT-SIUL"]),
+            ("P-24126", "Korpuso suvirinimas (TIG)", "WPS-141-01", ["VT-SIUL"])]:
+        t = task(code, name)
+        if not t:
+            continue
+        if wps_code:
+            con.execute("UPDATE tasks SET wps_id=? WHERE id=?", (wps[wps_code], t[0]))
+        for c in checks:
+            if con.execute("SELECT status FROM tasks WHERE id=?", (t[0],)).fetchone()[0] != "baigta":
+                quality.add_check(con, tech, t[0], {"template_id": tpl[c]})
+    # P-24108 dažyta, bet dangos storis dar neišmatuotas – rėmas sulaikytas kokybės eilėje
+    t = task("P-24108", "Dažymas RAL 5010")
+    if t:
+        con.execute("INSERT INTO task_checks (task_id, template_id, name, kind, unit, nominal, tol_minus, tol_plus, performer, "
+                    "instruction, sort) SELECT ?, id, name, kind, unit, nominal, tol_minus, tol_plus, performer, instruction, 1 "
+                    "FROM check_templates WHERE code='DAZ-STOR'", (t[0],))
